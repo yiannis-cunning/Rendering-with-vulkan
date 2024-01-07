@@ -22,6 +22,19 @@ void get_wind_dims(int *width, int *height){
        }
 }
 
+static double prevtime = 0; // Return the delta between function calls of this
+float get_delta_frame_time(){
+       double currentTime = glfwGetTime();
+       if(prevtime == 0){
+              prevtime = currentTime;
+              return 0;
+       }
+       double out = currentTime - prevtime;
+       prevtime = currentTime;
+       return out;
+       
+}
+
 
 static float dist = 8.66;
 static float dirc[3] = {1, 1, 1};
@@ -57,6 +70,8 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
        constMult(-1, offset, screen.view);
 }
 
+
+
 int main(int argc, char *argv[]){
        setvector_t(screen.offset, 10, 10, 10);
        setvector_t(screen.view, -1, -1, -1);
@@ -80,6 +95,7 @@ int main(int argc, char *argv[]){
        while (!glfwWindowShouldClose(window)){
               glfwPollEvents();
               vulkan_drawFrame(screen);
+              printf("\rDist: %f, theta: %f, fov %f", dist, theta, screen.fov);
 
        }
  

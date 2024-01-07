@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <io.h>
 #include <fcntl.h>
+#include <time.h>
 
 
 #include "glfw_main.h"
@@ -17,7 +18,7 @@
 
 // 1) Structs
 typedef struct QueueFamilyIndices_t {
-       int graphicsFamily;         // normal graphics queue index
+       int graphicsAndComputeFamily;         // normal graphics queue index
        int n_graphics_qs;
 
        int compatableFamily;       // a queue family that is for sure compatable with the surface you are using
@@ -61,6 +62,18 @@ QueueFamilyIndices_t findQueueFamilies(VkPhysicalDevice device);
 void createRenderPass();
 
 void createGraphicsPipeline();
+
+void createComputePipeline();
+
+void createComputeDescriptorSetLayout();
+
+void createComputeDescriptorSets();
+
+void createShaderStorageBuffers();
+
+void createComputeUniformBuffers();
+
+void recordComputeCommandBuffer(VkCommandBuffer commandBuffer);
 
 void createVertexBuffer();
 
@@ -110,6 +123,7 @@ void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyF
 
 void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 
+VkShaderModule make_shader_module(const char *filename);
 
 
 void *safe_calloc(uint32_t size, uint32_t amt);
@@ -127,7 +141,7 @@ typedef struct vulkan_instance_t{
        VkQueue              presentQueue;
 
 
-       // Swap chain and images
+       /* Swap chain KHR and images */
        VkSwapchainKHR       swapChain;
        VkFormat             swapChainImageFormat;
        VkExtent2D           swapChainExtent;
@@ -136,24 +150,24 @@ typedef struct vulkan_instance_t{
        uint32_t             imageCount;
        VkFramebuffer       *swapChainFramebuffers;
 
-       // renderpass and cmds
-       VkRenderPass        renderPass;
-       VkDescriptorSetLayout descriptorSetLayout;
-       VkPipelineLayout    pipelineLayout;
-       VkPipeline          graphicsPipeline;
-       VkCommandPool       commandPool;
-       VkCommandBuffer     *commandBuffers;
+       /* Render pass and pipelines */
+       VkRenderPass                renderPass;
+       VkDescriptorSetLayout       descriptorSetLayout;
+       VkPipelineLayout            pipelineLayout;
+       VkPipeline                  graphicsPipeline;
+       VkCommandPool               commandPool;
+       VkCommandBuffer             *commandBuffers;     // 1 for every in flight frame
 
-
-       VkSemaphore          *imageAvailableSemaphores;
-       VkSemaphore          *renderFinishedSemaphores;
+       /* Syncorhonization for frames*/
+       VkSemaphore          *imageAvailableSemaphores;  // 1 for every in flight frame
+       VkSemaphore          *renderFinishedSemaphores;  // 1 for every in flight frame
        VkFence              *inFlightFences;
        uint32_t             syncs_arr_size;
        uint32_t             currentFrame;
 
 
        // Render data
-       /* Not used right now */
+       /* Output image data */
        VkImage              colorImage;
        VkImageView          colorImageView;
        VkDeviceMemory       colorImageMemory;
@@ -183,6 +197,23 @@ typedef struct vulkan_instance_t{
        VkDescriptorPool     descriptorPool;
        VkDescriptorSet      *descriptorSets;
 
+       /* Compute resources */
+       VkDescriptorSetLayout       computeDescriptorSetLayout; // Layout of descriptors
+       VkPipelineLayout            computePipelineLayout;      // Layout of pipeline
+       VkPipeline                  computePipeline;            // Pipeline itself
+
+       VkDescriptorSet             *computeDescriptorSets;            // Desscriptor set(s) themselves - need one for each frame in flight
+       VkBuffer                    *shaderStorageBuffers;             // Where the particles[] are stored.
+       VkDeviceMemory              *shaderStorageBuffersMemory;       // ^
+
+       VkBuffer                    *computeUniformBuffers;
+       VkDeviceMemory              *computeUniformBuffersMemory;
+       void                        **computeUniformBuffersMapped;
+
+       VkCommandBuffer             *computeCommandBuffers;            // Place to put compute commands
+
+       VkSemaphore                 *computeFinishedSemaphores;  // 1 for every in flight frame
+       VkFence                     *computeInFlightFences;
 
        bool framebufferResized;
 
@@ -249,6 +280,22 @@ void vulkan_run(){
        printf("\n11) Createing a buffer for depth\n");
        createDepthResources();
 
+       printf("\n12) Creating a pool for descriptors\n");
+       createDescriptorPool();
+
+       // 4. Compute
+       printf("\n13)Creating a layout for the compute descriptor set\n");
+       createComputeDescriptorSetLayout();
+       printf("\n14)Creating the compute pipeline\n");
+       createComputePipeline();
+
+       printf("\n13)Creating/Allocation buffers for the points\n");
+       createShaderStorageBuffers(); // Init to particals []
+       printf("\n13)Creating/Allocation unifrom buffers\n");
+       createComputeUniformBuffers();
+       printf("\n14)Allocation The descriptor sets\n");
+       createComputeDescriptorSets();
+
        printf("\n9) Createing a frambuffer for each image in swap chain.\n");
        createFramebuffers();
 
@@ -258,7 +305,6 @@ void vulkan_run(){
 
        /* Uniform buffers*/
        createUniformBuffers();
-       createDescriptorPool();
        createDescriptorSets();
        
 
@@ -332,6 +378,260 @@ void *resize(void *allocation, uint32_t new_sz){
        if(allocation != NULL){free(allocation);}
        return safe_calloc(new_sz, 1);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+typedef struct compute_ubo_t{
+       float deltaTime;
+} compute_ubo_t;
+
+
+typedef struct partical_t{
+       vector4_t position;
+       vector4_t speed;
+       vector4_t color;
+} partical_t;
+
+
+static uint32_t n_particles = 12;
+
+static partical_t particles[] = {
+       {(vector4_t){0, 0, 1}, (vector4_t){0, 0, 1}, (vector4_t){1, 1, 0}},
+       {(vector4_t){1, 1, 1}, (vector4_t){0, 0, 1}, (vector4_t){1, 1, 0}},
+       {(vector4_t){0, 1, 1}, (vector4_t){0, 0, 1}, (vector4_t){1, 1, 0}},
+
+       {(vector4_t){1, 0, 2}, (vector4_t){0, 0, -1}, (vector4_t){1, 1, 0}},
+       {(vector4_t){1, -1, 2}, (vector4_t){0, 0, -1}, (vector4_t){1, 1, 0}},
+       {(vector4_t){0, -1, 2}, (vector4_t){0, 0, -1}, (vector4_t){1, 1, 0}},
+
+       {(vector4_t){-1, 0, 0.5}, (vector4_t){0, 0, 1}, (vector4_t){1, 1, 0}},
+       {(vector4_t){-1, -1, 0.5}, (vector4_t){0, 0, 1}, (vector4_t){1, 1, 0}},
+       {(vector4_t){0, -1, 0.5}, (vector4_t){0, 0, 1}, (vector4_t){1, 1, 0}},
+
+       {(vector4_t){-1, 0, -0.5}, (vector4_t){0, 0, -1}, (vector4_t){1, 1, 0}},
+       {(vector4_t){-1, 1, -0.5}, (vector4_t){0, 0, -1}, (vector4_t){1, 1, 0}},
+       {(vector4_t){0, 1, -0.5}, (vector4_t){0, 0, -1}, (vector4_t){1, 1, 0}},
+};
+
+/*
+Here to specify the format of the partical buffer array - only for graphics pipline part.
+       - Need to specify the layout of position, speed, and color
+       - alos the layout of consecutive elements in a array
+*/
+static VkVertexInputAttributeDescription particleAttributes[3] = {
+       (VkVertexInputAttributeDescription){0, 0, VK_FORMAT_R32G32B32_SFLOAT /*not actually color related*/, offsetof(partical_t, position)},
+       (VkVertexInputAttributeDescription){1, 0, VK_FORMAT_R32G32B32_SFLOAT /*not actually color related*/, offsetof(partical_t, color)}
+};
+
+static VkVertexInputBindingDescription particleBindingDescription[1] = {
+       0, sizeof(partical_t), VK_VERTEX_INPUT_RATE_VERTEX
+};
+
+
+void createShaderStorageBuffers(){
+       // 1. will need to allocate the saved buffers
+       if(vulkan_info.shaderStorageBuffers != NULL){free(vulkan_info.shaderStorageBuffers);}
+       vulkan_info.shaderStorageBuffers = (VkBuffer *)calloc(sizeof(VkBuffer), MAX_FRAMES_IN_FLIGHT);
+       
+       if(vulkan_info.shaderStorageBuffersMemory != NULL){free(vulkan_info.shaderStorageBuffersMemory);}
+       vulkan_info.shaderStorageBuffersMemory = (VkDeviceMemory *)calloc(sizeof(VkDeviceMemory), MAX_FRAMES_IN_FLIGHT);
+
+       // 2. Create temp staging buffer for initial data
+       VkDeviceSize bufferSize = sizeof(partical_t) * n_particles;
+
+       VkBuffer             stagingBuffer;
+       VkDeviceMemory       stagingBufferMemory;
+       createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &stagingBuffer, &stagingBufferMemory);
+
+       // 3. Copy to the temp, cpu local, buffer
+       void* data;
+       vkMapMemory(vulkan_info.device, stagingBufferMemory, 0, bufferSize, 0, &data);
+       memcpy(data, particles, (size_t)bufferSize);
+       vkUnmapMemory(vulkan_info.device, stagingBufferMemory);
+
+
+       for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+              // 4. Make and copy data from the staging buffer (host) to the shader storage buffer (GPU)
+              createBuffer(bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &(vulkan_info.shaderStorageBuffers[i]), &(vulkan_info.shaderStorageBuffersMemory[i]));
+              copyBuffer(stagingBuffer, vulkan_info.shaderStorageBuffers[i], bufferSize);
+       }
+
+}
+
+void createComputePipeline(){
+       // Very simple.
+       // 1. Make the layout
+       VkShaderModule computeShaderModule = make_shader_module("shaders/compute.spv");
+
+       VkPipelineShaderStageCreateInfo computeShaderStageInfo = {0};
+       computeShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+       computeShaderStageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+       computeShaderStageInfo.module = computeShaderModule;
+       computeShaderStageInfo.pName = "main";
+
+       VkPipelineLayoutCreateInfo pipelineLayoutInfo = {0};
+       pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+       pipelineLayoutInfo.setLayoutCount = 1;
+       pipelineLayoutInfo.pSetLayouts = &(vulkan_info.computeDescriptorSetLayout);
+
+       check_err(vkCreatePipelineLayout(vulkan_info.device, &pipelineLayoutInfo, NULL, &(vulkan_info.computePipelineLayout)), "failed to create compute pipeline layout!");
+
+       // 2. Create the pipeline
+       VkComputePipelineCreateInfo pipelineInfo = {0};
+       pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+       pipelineInfo.layout = vulkan_info.computePipelineLayout;
+       pipelineInfo.stage = computeShaderStageInfo;
+       check_err(vkCreateComputePipelines(vulkan_info.device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &(vulkan_info.computePipeline)), "failed to create compute pipeline!");
+
+       // 3. Free the shader
+       vkDestroyShaderModule(vulkan_info.device, computeShaderModule, NULL);
+}
+
+void createComputeDescriptorSetLayout(){
+
+       // 1. Create the descriptor set layouts
+       VkDescriptorSetLayoutBinding layoutBindings[3] = {0}; // 3 bindings in the compute shader
+       layoutBindings[0].binding = 0;
+       layoutBindings[0].descriptorCount = 1;
+       layoutBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; // Uniform
+       layoutBindings[0].pImmutableSamplers = NULL;
+       layoutBindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+       layoutBindings[1].binding = 1;
+       layoutBindings[1].descriptorCount = 1;
+       layoutBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; // input buffer
+       layoutBindings[1].pImmutableSamplers = NULL;
+       layoutBindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+       layoutBindings[2].binding = 2;
+       layoutBindings[2].descriptorCount = 1;
+       layoutBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; // output buffer
+       layoutBindings[2].pImmutableSamplers = NULL;
+       layoutBindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+       VkDescriptorSetLayoutCreateInfo layoutInfo = {0};
+       layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+       layoutInfo.bindingCount = 3;
+       layoutInfo.pBindings = layoutBindings;
+
+       check_err(vkCreateDescriptorSetLayout(vulkan_info.device, &layoutInfo, NULL, &(vulkan_info.computeDescriptorSetLayout)), "failed to create compute descriptor set layout!");
+
+}
+
+void createComputeDescriptorSets(){
+       // Consider the layout we defined before ^^, the memory we allocated ^^, need to allocated MAX_FRAMES of them
+
+       // 1. Save space for array of descriptorsets
+       if(vulkan_info.computeDescriptorSets != NULL){free(vulkan_info.computeDescriptorSets);}
+       vulkan_info.computeDescriptorSets = (VkDescriptorSet *)calloc(sizeof(VkDescriptorSet), MAX_FRAMES_IN_FLIGHT);
+
+       // 2. Specify allocate info - (all the same layout)
+       VkDescriptorSetLayout *layouts = (VkDescriptorSetLayout *) calloc(sizeof(VkDescriptorSetLayout), MAX_FRAMES_IN_FLIGHT);
+       for(int i = 0; i < MAX_FRAMES_IN_FLIGHT; i+= 1){layouts[i] = vulkan_info.computeDescriptorSetLayout;}
+
+       VkDescriptorSetAllocateInfo allocInfo = {0};
+       allocInfo.sType                 = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+       allocInfo.descriptorPool        = vulkan_info.descriptorPool;
+       allocInfo.descriptorSetCount    = MAX_FRAMES_IN_FLIGHT;
+       allocInfo.pSetLayouts           = layouts;
+       check_err(vkAllocateDescriptorSets(vulkan_info.device, &allocInfo, vulkan_info.computeDescriptorSets), "failed to allocate descriptor sets!");
+
+
+       // 3. will need to update all the desccriptor sets with refrences to the correct bufferes
+       for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i+= 1) {
+              VkWriteDescriptorSet descriptorWrites[3] = {0}; // Have to bind 3 buffers to the descriptor set
+              
+              // a) unifrom buffer
+              VkDescriptorBufferInfo uniformBufferInfo = {0};
+              uniformBufferInfo.buffer = vulkan_info.computeUniformBuffers[i];      // The buffer
+              uniformBufferInfo.offset = 0;
+              uniformBufferInfo.range = sizeof(compute_ubo_t);                      // The size
+
+              descriptorWrites[0].sType                 = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+              descriptorWrites[0].dstSet                = vulkan_info.computeDescriptorSets[i];
+              descriptorWrites[0].dstBinding            = 0;
+              descriptorWrites[0].dstArrayElement       = 0;
+              descriptorWrites[0].descriptorType        = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+              descriptorWrites[0].descriptorCount       = 1;
+              descriptorWrites[0].pBufferInfo           = &uniformBufferInfo;
+
+              // b) src buffer
+              VkDescriptorBufferInfo storageBufferInfoLastFrame = {0}; // srcBuffer
+              storageBufferInfoLastFrame.buffer = vulkan_info.shaderStorageBuffers[(i - 1 + MAX_FRAMES_IN_FLIGHT) % MAX_FRAMES_IN_FLIGHT]; // The buffer of prev frame
+              storageBufferInfoLastFrame.offset = 0;
+              storageBufferInfoLastFrame.range = sizeof(partical_t) * n_particles; // The size
+
+              descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+              descriptorWrites[1].dstSet                = vulkan_info.computeDescriptorSets[i];
+              descriptorWrites[1].dstBinding            = 1;
+              descriptorWrites[1].dstArrayElement       = 0;
+              descriptorWrites[1].descriptorType        = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+              descriptorWrites[1].descriptorCount       = 1;
+              descriptorWrites[1].pBufferInfo           = &storageBufferInfoLastFrame;
+
+              // c) dest buffer
+              VkDescriptorBufferInfo storageBufferInfoCurrentFrame = {0};
+              storageBufferInfoCurrentFrame.buffer = vulkan_info.shaderStorageBuffers[i];
+              storageBufferInfoCurrentFrame.offset = 0;
+              storageBufferInfoCurrentFrame.range = sizeof(partical_t) * n_particles;
+
+              descriptorWrites[2].sType                 = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+              descriptorWrites[2].dstSet                = vulkan_info.computeDescriptorSets[i];
+              descriptorWrites[2].dstBinding            = 2;
+              descriptorWrites[2].dstArrayElement       = 0;
+              descriptorWrites[2].descriptorType        = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+              descriptorWrites[2].descriptorCount       = 1;
+              descriptorWrites[2].pBufferInfo           = &storageBufferInfoCurrentFrame;
+
+              vkUpdateDescriptorSets(vulkan_info.device, 3, descriptorWrites, 0, NULL); // 3 descriptors in each set, 1 set per frame
+       }
+
+       free(layouts);
+
+}
+
+void createComputeUniformBuffers(){
+       VkDeviceSize bufferSize = sizeof(compute_ubo_t);
+
+       if(vulkan_info.computeUniformBuffers != NULL){free(vulkan_info.computeUniformBuffers);}
+       vulkan_info.computeUniformBuffers = (VkBuffer *)calloc(sizeof(VkBuffer), MAX_FRAMES_IN_FLIGHT);
+
+       if(vulkan_info.computeUniformBuffersMemory != NULL){free(vulkan_info.computeUniformBuffersMemory);}
+       vulkan_info.computeUniformBuffersMemory = (VkDeviceMemory *)calloc(sizeof(VkDeviceMemory), MAX_FRAMES_IN_FLIGHT);
+
+       if(vulkan_info.computeUniformBuffersMapped != NULL){free(vulkan_info.computeUniformBuffersMapped);}
+       vulkan_info.computeUniformBuffersMapped = (void **)calloc(sizeof(void *), 1);
+
+
+       for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+              createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &(vulkan_info.computeUniformBuffers[i]), &(vulkan_info.computeUniformBuffersMemory[i]));
+
+              vkMapMemory(vulkan_info.device, vulkan_info.computeUniformBuffersMemory[i], 0, bufferSize, 0, &(vulkan_info.computeUniformBuffersMapped[i]));
+       }
+}
+
+
+void updateComputeUniformBuffer(int currentFrame){
+       compute_ubo_t ubo = {0};
+
+       ubo.deltaTime = get_delta_frame_time();
+       //printf("\n DeltaTime = %f\n", ubo.deltaTime);
+       memcpy(vulkan_info.computeUniformBuffersMapped[currentFrame], &ubo, sizeof(compute_ubo_t));
+
+}
+
+
+
 
 
 
@@ -471,11 +771,11 @@ void updateUniformBuffer(uint32_t currentImage, screenProperties_t screen){
 
        /*
            {{-0.5f, -0.5f, 0.5}, {1.0f, 0.0f, 0.0f}},
-    {{0.5f, -0.5f, 0.5}, {0.0f, 1.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.5}, {0.0f, 0.0f, 1.0f}},
-    {{-0.5f, 0.5f, 0.5}, {1.0f, 1.0f, 1.0f}},
+       {{0.5f, -0.5f, 0.5}, {0.0f, 1.0f, 0.0f}},
+       {{0.5f, 0.5f, 0.5}, {0.0f, 0.0f, 1.0f}},
+       {{-0.5f, 0.5f, 0.5}, {1.0f, 1.0f, 1.0f}},
 
-    {{-0.5f, -0.5f, -0.5}, {1.0f, 0.0f, 0.0f}},       printf("\n\n");
+       {{-0.5f, -0.5f, -0.5}, {1.0f, 0.0f, 0.0f}},       printf("\n\n");
        vector4_t inp = {-0.5f, -0.5f, 0.5, 1};
        pvector4(inp, "TOP-POINT");
        pvector4(multiply4(proj_mat, multiply4(view_mat, inp)), "OUTPUT0");
@@ -496,14 +796,14 @@ void createDescriptorPool(){
        // 1. Make size structure
        VkDescriptorPoolSize poolSize = {0};
        poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-       poolSize.descriptorCount = MAX_FRAMES_IN_FLIGHT;
+       poolSize.descriptorCount = MAX_FRAMES_IN_FLIGHT*2;      // 2 for each frame, both compute and graphics
 
        // 2. Make pool create structure
        VkDescriptorPoolCreateInfo poolInfo = {0};
        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
        poolInfo.poolSizeCount = 1;
        poolInfo.pPoolSizes = &poolSize;
-       poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
+       poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT*2;
 
        /* use VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT if you want to be able to free descriptor sets*/
        check_err(vkCreateDescriptorPool(vulkan_info.device, &poolInfo, NULL, &(vulkan_info.descriptorPool)), "failed to create descriptor pool!");
@@ -733,12 +1033,63 @@ void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyF
 
 
 
+void recordComputeCommandBuffer(VkCommandBuffer commandBuffer) {
+
+       // 1. Start recording to the command buffer
+       VkCommandBufferBeginInfo beginInfo = {0};
+       beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+       check_err(vkBeginCommandBuffer(commandBuffer, &beginInfo), "failed to begin recording command buffer!");
+
+
+       // 2. Bind the compute pipeline
+       vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_info.computePipeline);
+
+       // 4. Bind to the descriptor sets
+       vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_info.computePipelineLayout, 0, 1, &(vulkan_info.computeDescriptorSets[vulkan_info.currentFrame]), 0, NULL);
+       
+       // 4. send the compute
+       vkCmdDispatch(commandBuffer, ceil((float)n_particles / 256.0f), 1, 1);
+
+       check_err(vkEndCommandBuffer(commandBuffer), "failed to record command buffer!");
+
+}
 
 
 
 
 
 void draw(screenProperties_t screen){
+       
+       // 1. Wait for previous submit commands to finish before starting new commands
+       vkWaitForFences(vulkan_info.device, 1, &(vulkan_info.computeInFlightFences[vulkan_info.currentFrame]), VK_TRUE, UINT64_MAX);
+       // 2. Reset the fences before submitting.
+       vkResetFences(vulkan_info.device, 1, &(vulkan_info.computeInFlightFences[vulkan_info.currentFrame]));
+
+       updateComputeUniformBuffer(vulkan_info.currentFrame);
+
+       // 2. Record the command buffer
+       vkResetCommandBuffer(vulkan_info.computeCommandBuffers[vulkan_info.currentFrame], /*VkCommandBufferResetFlagBits*/ 0);
+       recordComputeCommandBuffer(vulkan_info.computeCommandBuffers[vulkan_info.currentFrame]); // , deltaTime??
+
+
+       // 3. Submit
+       VkSemaphore computeSignalSemaphores[1] = {vulkan_info.computeFinishedSemaphores[vulkan_info.currentFrame]};
+       // Dont have to wait on previous frame finishing rendering? - assume the previous submit is done?
+
+       VkSubmitInfo computeSubmitInfo = {0};
+       computeSubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+       computeSubmitInfo.commandBufferCount = 1;
+       computeSubmitInfo.pCommandBuffers = &(vulkan_info.computeCommandBuffers[vulkan_info.currentFrame]); // Get the command buffer you just filled out
+       computeSubmitInfo.signalSemaphoreCount = 1;
+       computeSubmitInfo.pSignalSemaphores = computeSignalSemaphores;
+
+       check_err(vkQueueSubmit(vulkan_info.graphicsQueue, 1, &computeSubmitInfo, vulkan_info.computeInFlightFences[vulkan_info.currentFrame]), "failed to submit compute render pass!");
+
+       
+
+
+
        vkWaitForFences(vulkan_info.device, 1, &(vulkan_info.inFlightFences[vulkan_info.currentFrame]), VK_TRUE, UINT64_MAX);
 
        uint32_t imageIndex = 0;
@@ -765,9 +1116,9 @@ void draw(screenProperties_t screen){
        VkSubmitInfo submitInfo = {0};
        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-       VkSemaphore waitSemaphores[1] = {vulkan_info.imageAvailableSemaphores[vulkan_info.currentFrame]};
-       VkPipelineStageFlags waitStages[1] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
-       submitInfo.waitSemaphoreCount = 1;
+       VkSemaphore waitSemaphores[2] = {vulkan_info.computeFinishedSemaphores[vulkan_info.currentFrame], vulkan_info.imageAvailableSemaphores[vulkan_info.currentFrame] };
+       VkPipelineStageFlags waitStages[2] = {VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+       submitInfo.waitSemaphoreCount = 2;
        submitInfo.pWaitSemaphores = waitSemaphores;
        submitInfo.pWaitDstStageMask = waitStages;
 
@@ -877,17 +1228,17 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, scr
 
        VkBuffer vertexBuffers[] = {vulkan_info.vertexBuffer};
        VkDeviceSize offsets[] = {0};
-       vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+       vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vulkan_info.shaderStorageBuffers[vulkan_info.currentFrame], offsets); // vertexBuffers
 
-       vkCmdBindIndexBuffer(commandBuffer, vulkan_info.indexBuffer, 0, VK_INDEX_TYPE_UINT16); /* 16 is the type of index data (we dont have very big vertex array right now*/
+       //vkCmdBindIndexBuffer(commandBuffer, vulkan_info.indexBuffer, 0, VK_INDEX_TYPE_UINT16); /* 16 is the type of index data (we dont have very big vertex array right now*/
 
        updateUniformBuffer(vulkan_info.currentFrame, screen);
 
        
        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_info.pipelineLayout, 0, 1/*descriptorSetCount*/, &(vulkan_info.descriptorSets[vulkan_info.currentFrame]), 0, NULL);
        
-       //vkCmdDraw(commandBuffer, n_verticies, 1, 0, 0);
-       vkCmdDrawIndexed(commandBuffer, n_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
+       vkCmdDraw(commandBuffer, n_particles, 1, 0, 0); // n_verticies
+       //vkCmdDrawIndexed(commandBuffer, n_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
 
        vkCmdEndRenderPass(commandBuffer);
 
@@ -904,10 +1255,19 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, scr
 void createSyncObjects() {
        if(vulkan_info.imageAvailableSemaphores != NULL){free(vulkan_info.imageAvailableSemaphores);}
        vulkan_info.imageAvailableSemaphores = (VkSemaphore *)calloc(sizeof(VkSemaphore), MAX_FRAMES_IN_FLIGHT);
+
        if(vulkan_info.renderFinishedSemaphores != NULL){free(vulkan_info.renderFinishedSemaphores);}
        vulkan_info.renderFinishedSemaphores = (VkSemaphore *)calloc(sizeof(VkSemaphore), MAX_FRAMES_IN_FLIGHT);
+
+       if(vulkan_info.computeFinishedSemaphores != NULL){free(vulkan_info.computeFinishedSemaphores);}
+       vulkan_info.computeFinishedSemaphores = (VkSemaphore *)calloc(sizeof(VkSemaphore), MAX_FRAMES_IN_FLIGHT); // added for compute
+
        if(vulkan_info.inFlightFences != NULL){free(vulkan_info.inFlightFences);}
        vulkan_info.inFlightFences = (VkFence *)calloc(sizeof(VkFence), MAX_FRAMES_IN_FLIGHT);
+
+       if(vulkan_info.computeInFlightFences != NULL){free(vulkan_info.computeInFlightFences);}
+       vulkan_info.computeInFlightFences = (VkFence *)calloc(sizeof(VkFence), MAX_FRAMES_IN_FLIGHT); // Added for compute
+
        vulkan_info.syncs_arr_size = MAX_FRAMES_IN_FLIGHT;
 
 
@@ -921,6 +1281,8 @@ void createSyncObjects() {
        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
               check_err(vkCreateSemaphore(vulkan_info.device, &semaphoreInfo, NULL, &(vulkan_info.imageAvailableSemaphores[i])) & \
                      vkCreateSemaphore(vulkan_info.device, &semaphoreInfo, NULL, &(vulkan_info.renderFinishedSemaphores[i])) & \
+                     vkCreateSemaphore(vulkan_info.device, &semaphoreInfo, NULL, &(vulkan_info.computeFinishedSemaphores[i])) & \
+                     vkCreateFence(vulkan_info.device, &fenceInfo, NULL, &(vulkan_info.computeInFlightFences[i])) & \
                      vkCreateFence(vulkan_info.device, &fenceInfo, NULL, &(vulkan_info.inFlightFences[i])),  \
                      "failed to create synchronization objects for a frame!");
        }
@@ -963,13 +1325,16 @@ void createFramebuffers(){
 void createCommandBuffers() {
        if(vulkan_info.commandBuffers != NULL){free(vulkan_info.commandBuffers);}
        vulkan_info.commandBuffers = NULL;
-       vulkan_info.commandBuffers = (VkCommandBuffer *)calloc(sizeof(VkCommandBuffer), MAX_FRAMES_IN_FLIGHT);
+
+       vulkan_info.commandBuffers = (VkCommandBuffer *)calloc(sizeof(VkCommandBuffer), MAX_FRAMES_IN_FLIGHT*2);
 
        VkCommandBufferAllocateInfo allocInfo = {0};
        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
        allocInfo.commandPool = vulkan_info.commandPool;
        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-       allocInfo.commandBufferCount = (uint32_t) MAX_FRAMES_IN_FLIGHT;
+       allocInfo.commandBufferCount = (uint32_t) MAX_FRAMES_IN_FLIGHT*2;
+
+       vulkan_info.computeCommandBuffers = vulkan_info.commandBuffers + MAX_FRAMES_IN_FLIGHT;
 
        check_err(vkAllocateCommandBuffers(vulkan_info.device, &allocInfo, vulkan_info.commandBuffers), "failed to allocate command buffers!");
 
@@ -1067,7 +1432,7 @@ void createCommandPool() {
        VkCommandPoolCreateInfo poolInfo = {0};
        poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-       poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily;
+       poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsAndComputeFamily;
 
        check_err(vkCreateCommandPool(vulkan_info.device, &poolInfo, NULL, &(vulkan_info.commandPool)), "failed to create graphics command pool!");
 }
@@ -1144,8 +1509,8 @@ void createGraphicsPipeline() {
        vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
        vertexInputInfo.vertexBindingDescriptionCount = 1;
        vertexInputInfo.vertexAttributeDescriptionCount = 2;
-       vertexInputInfo.pVertexBindingDescriptions = &VertextTrianlge2Ddescription;
-       vertexInputInfo.pVertexAttributeDescriptions = VertextTrianlge2DAttributes;
+       vertexInputInfo.pVertexBindingDescriptions = particleBindingDescription; //&VertextTrianlge2Ddescription;
+       vertexInputInfo.pVertexAttributeDescriptions = particleAttributes; //VertextTrianlge2DAttributes;
 
        VkPipelineInputAssemblyStateCreateInfo inputAssembly = {0};    // Describes the assembly state -> how cords are draw
        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -1438,9 +1803,9 @@ void createSwapChain(){
        createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;   // Used for images to screen
 
        QueueFamilyIndices_t indices = findQueueFamilies(vulkan_info.phyDevice);
-       uint32_t queueFamilyIndices[2] = {indices.graphicsFamily, indices.compatableFamily};
+       uint32_t queueFamilyIndices[2] = {indices.graphicsAndComputeFamily, indices.compatableFamily};
 
-        if (indices.graphicsFamily != indices.compatableFamily) {
+        if (indices.graphicsAndComputeFamily != indices.compatableFamily) {
               createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT; // When present modes are not equal to graphics mode
               createInfo.queueFamilyIndexCount = 2;
               createInfo.pQueueFamilyIndices = queueFamilyIndices;
@@ -1481,12 +1846,12 @@ void createLogicalDevice(){
        QueueFamilyIndices_t good_qs = findQueueFamilies(vulkan_info.phyDevice);
 
        VkDeviceQueueCreateInfo *new_qs;
-       passert(good_qs.compatableFamily != -1 && good_qs.graphicsFamily != -1, "Bad device given to make logical device");
+       passert(good_qs.compatableFamily != -1 && good_qs.graphicsAndComputeFamily != -1, "Bad device given to make logical device");
               
        float prio = 1.0f;
        uint32_t n_queues = 0;
 
-       if(good_qs.compatableFamily != good_qs.graphicsFamily){
+       if(good_qs.compatableFamily != good_qs.graphicsAndComputeFamily){
               new_qs = (VkDeviceQueueCreateInfo *)calloc(sizeof(VkDeviceQueueCreateInfo), 2);
               new_qs[1].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
               new_qs[1].pNext = NULL;
@@ -1503,7 +1868,7 @@ void createLogicalDevice(){
        new_qs[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
        new_qs[0].pNext = NULL;
        new_qs[0].flags = 0;
-       new_qs[0].queueFamilyIndex = good_qs.graphicsFamily;
+       new_qs[0].queueFamilyIndex = good_qs.graphicsAndComputeFamily;
        new_qs[0].queueCount = 1;
        new_qs[0].pQueuePriorities = &prio;
 
@@ -1523,7 +1888,7 @@ void createLogicalDevice(){
        check_err(vkCreateDevice(vulkan_info.phyDevice, &device_create_info, NULL, &vulkan_info.device), "Creating a logical device.");
        free(new_qs);
 
-       vkGetDeviceQueue(vulkan_info.device, good_qs.graphicsFamily, 0, &(vulkan_info.graphicsQueue));
+       vkGetDeviceQueue(vulkan_info.device, good_qs.graphicsAndComputeFamily, 0, &(vulkan_info.graphicsQueue));
        vkGetDeviceQueue(vulkan_info.device, good_qs.compatableFamily, 0, &(vulkan_info.presentQueue));
 
 }
@@ -1600,7 +1965,7 @@ int isDeviceSuitable(VkPhysicalDevice device) {
 
        printf("      Getting queue famiiy\n");
        QueueFamilyIndices_t indxes = findQueueFamilies(device);
-       if(indxes.graphicsFamily == -1 || indxes.compatableFamily == -1){printf("    - Device does not have a graphics Q and/or there is no Q that supports this KHR surface\n");return -1;}
+       if(indxes.graphicsAndComputeFamily == -1 || indxes.compatableFamily == -1){printf("    - Device does not have a graphics Q and/or there is no Q that supports this KHR surface\n");return -1;}
 
        printf("      Checking support for swap chain\n");
        SwapChainSupportDetails_t details = querySwapChainSupport(device);
@@ -1663,7 +2028,7 @@ bool checkDeviceExtensionSupport(VkPhysicalDevice device){
 
 QueueFamilyIndices_t findQueueFamilies(VkPhysicalDevice device){
        QueueFamilyIndices_t indices;
-       indices.graphicsFamily = -1;
+       indices.graphicsAndComputeFamily = -1;
        indices.n_graphics_qs = 0;
        indices.compatableFamily = -1;
        indices.n_compatability_qs = 0;
@@ -1681,8 +2046,8 @@ QueueFamilyIndices_t findQueueFamilies(VkPhysicalDevice device){
        // 2) loop thorugh to find a the two compatable queue indexes
        for (int i = 0; i < queueFamilyCount; i += 1) {
               queueFamily = queueFamilies[i];
-              if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
-                     indices.graphicsFamily = i;
+              if( (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) && (queueFamily.queueFlags & VK_QUEUE_COMPUTE_BIT) ){
+                     indices.graphicsAndComputeFamily = i;
                      indices.n_graphics_qs = queueFamily.queueCount;
               }
 
@@ -1694,7 +2059,7 @@ QueueFamilyIndices_t findQueueFamilies(VkPhysicalDevice device){
                      indices.n_compatability_qs = queueFamily.queueCount;
               }
 
-              if (indices.graphicsFamily != -1 && indices.compatableFamily != -1) {
+              if (indices.graphicsAndComputeFamily != -1 && indices.compatableFamily != -1) {
                      break;
               }
 
@@ -1893,10 +2258,50 @@ Adding vertex buffer
        - Will need to specify the formate inputted in the graphics pipeline
        - Will need to bind the buffers/allocaions as a cmd before drawing.
 
-Adding global vairables/ dynamic data
+Adding global vairables/ dynamic data - unifrom buffers
        - Make a descriptor set layout during pipeline creation
        - Allocate descriptor set from descriptor pool
        - Bind the set during rendeing
+
+
+Adding a compute stage
+       - Will need descriptor set layout
+              - Uniform
+                     - Make struct for arguments (certain alignemnet)
+              - storage buffers
+                     - specify struct for storage elements
+       - Will need allocations of the buffers
+       - Will need the descriptor sets themselves (MAX_IN_FLIGHT_FRAMESx)
+              - Uniform
+                     - Make buffer + allocation for this
+                     - move data to this buffer by mapping memory
+              - storage buffers
+                     - Make buffer + allocation for this
+                     - init data with cmd/submit from staging buffer (quicker)
+       - Will need a compute pipeline. (VkPipelineLayout // VkPipeline)
+              - Upload the code
+              - specify descriptor set layout format. (VkDescriptorSetLayout)
+              - bind to the desciptor set for currframe
+       - Will need synchronization.
+              - Will need MAX_IN_FLIGHT_FRAMESx fences (dont start compute record before same compute record still not submitted.)
+              - Will need MAX_IN_FLIGHT_FRAMESx semaphores (dont start graphics before compute done)
+       - To link the output buffer of the compute with the input vertex buffer of the graphics
+              - Will need to specify the bindings/attributes of array buffer in graphics pipeline
+       
+
+       Compute shader
+              - will require a defined input layout (remmeber its aligned to 16 bytes?)
+              - in a layout definition you can specify other properties of the memory you read/write to. (std140?)
+              - it will also have a binding that should match the pipline/renderpass object
+
+
+Custimizing the Compute shader
+       - Will need to make comute shader process the inputs -> outputs
+       - Will need to link the output of the compute shader as the input of the vertex shader
+              - Make graphics commands take in compute output for that frame, draw non-indexed with amt = n_particles
+
+
+
 
 NOTES
        - No Callback to recreate swap chain
