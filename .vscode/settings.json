@@ -68,6 +68,7 @@
               "xstring": "c",
               "xtr1common": "c",
               "xtree": "c",
-              "xutility": "c"
+              "xutility": "c",
+              "random": "c"
        }
 }

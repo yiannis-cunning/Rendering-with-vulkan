@@ -183,7 +183,7 @@ typedef struct vulkan_instance_t{
        VkImageView          textureImageView;
        VkDeviceMemory       textureImageMemory;
 
-       // 2D/3D vertex map
+       // Vertex data
        VkBuffer             vertexBuffer;
        VkDeviceMemory       vertexBufferMemory;
        VkBuffer             indexBuffer;
@@ -198,10 +198,12 @@ typedef struct vulkan_instance_t{
        VkDescriptorSet      *descriptorSets;
 
        /* Compute resources */
+       //     Layouts of the pipeline + inout data
        VkDescriptorSetLayout       computeDescriptorSetLayout; // Layout of descriptors
        VkPipelineLayout            computePipelineLayout;      // Layout of pipeline
        VkPipeline                  computePipeline;            // Pipeline itself
 
+       //     allocations.
        VkDescriptorSet             *computeDescriptorSets;            // Desscriptor set(s) themselves - need one for each frame in flight
        VkBuffer                    *shaderStorageBuffers;             // Where the particles[] are stored.
        VkDeviceMemory              *shaderStorageBuffersMemory;       // ^
@@ -212,8 +214,15 @@ typedef struct vulkan_instance_t{
 
        VkCommandBuffer             *computeCommandBuffers;            // Place to put compute commands
 
+       //     Synchronization
        VkSemaphore                 *computeFinishedSemaphores;  // 1 for every in flight frame
        VkFence                     *computeInFlightFences;
+
+
+       /* line pipline */
+
+       VkPipeline                  lineGraphicsPipeline;
+
 
        bool framebufferResized;
 
@@ -862,6 +871,7 @@ void createDescriptorSets(){
 
 
 /* This section is for handling vertext data
+// Defined in header vulkan3.h
 typedef struct Vertex_t{
        float pos[3];
        float color[3];
@@ -873,27 +883,30 @@ static VkVertexInputAttributeDescription VertextTrianlge2DAttributes[2] = {
        (VkVertexInputAttributeDescription){1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex_t, color) }
 };
 
-static int n_verticies = 8;
+static int n_verticies = 9;
 
 
 static Vertex_t VertexTriangle2D[] = {
-    {{-0.5f, -0.5f, -0.5}, {1.0f, 0.0f, 0.0f}},
-    {{0.5f, -0.5f, -0.5}, {0.0f, 1.0f, 0.0f}},
-    {{0.5f, 0.5f, -0.5}, {0.0f, 0.0f, 1.0f}},
-    {{-0.5f, 0.5f, -0.5}, {1.0f, 1.0f, 1.0f}},
+       {{0.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+       {{0.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+       {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}},
 
-    {{-0.5f, -0.5f, 0.5}, {1.0f, 0.0f, 0.0f}},
-    {{0.5f, -0.5f, 0.5}, {0.0f, 1.0f, 0.0f}},
-    {{0.5f, 0.5f, 0.5}, {0.0f, 0.0f, 1.0f}},
-    {{-0.5f, 0.5f, 0.5}, {1.0f, 1.0f, 1.0f}}
+
+       {{10.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+       {{-10.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+
+       {{0.0f, 10.0f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+       {{0.0f, -10.0f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+
+       {{0.0f, 0.0f, 10.0f}, {0.0f, 0.0f, 1.0f}},
+       {{0.0f, 0.0f, -10.0f}, {0.0f, 0.0f, 1.0f}}
 };
 
-static int n_indicies = 15;
+static int n_indicies = 12;
 
 const uint16_t indicies[] = {
-       0, 1, 2, 2, 3, 0,
-       4, 5, 6, 6, 7, 4,
-       0, 1, 4
+       0, 3, 0, 4, 1, 5, 1, 6,
+       2, 7, 2, 8
 };
 
 static VkVertexInputBindingDescription VertextTrianlge2Ddescription = {
@@ -1240,6 +1253,23 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, scr
        vkCmdDraw(commandBuffer, n_particles, 1, 0, 0); // n_verticies
        //vkCmdDrawIndexed(commandBuffer, n_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
 
+       
+
+       vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_info.lineGraphicsPipeline);
+
+       vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+       vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+       vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vulkan_info.vertexBuffer, offsets); 
+       
+       vkCmdBindIndexBuffer(commandBuffer, vulkan_info.indexBuffer, 0, VK_INDEX_TYPE_UINT16); /* 16 is the type of index data (we dont have very big vertex array right now*/
+
+       vkCmdDrawIndexed(commandBuffer, n_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
+
+
+       
+
        vkCmdEndRenderPass(commandBuffer);
 
        check_err(vkEndCommandBuffer(commandBuffer), "failed to record command buffer!");
@@ -1517,6 +1547,7 @@ void createGraphicsPipeline() {
        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; // VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; // VK_PRIMITIVE_TOPOLOGY_LINE_LIST VK_PRIMITIVE_TOPOLOGY_POINT_LIST
        inputAssembly.primitiveRestartEnable = VK_FALSE;
 
+
        // 3. output viewport info
        VkPipelineViewportStateCreateInfo viewportState = {0};
        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -1596,6 +1627,26 @@ void createGraphicsPipeline() {
        pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 
        check_err(vkCreateGraphicsPipelines(vulkan_info.device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &(vulkan_info.graphicsPipeline)), "failed to create graphics pipeline!");
+
+
+       // 1. A differnet assembler is needed (lines not trianlges)
+       VkPipelineInputAssemblyStateCreateInfo lineInputAssembly = {0};    // Describes the assembly state -> how cords are draw
+       lineInputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+       lineInputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST; // VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; // VK_PRIMITIVE_TOPOLOGY_LINE_LIST VK_PRIMITIVE_TOPOLOGY_POINT_LIST
+       lineInputAssembly.primitiveRestartEnable = VK_FALSE;
+
+       // 2. The buffer of vertecies is different format
+       VkPipelineVertexInputStateCreateInfo lineVertexInputInfo = {0};    // Descirbes the input to the first vertex state
+       lineVertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+       lineVertexInputInfo.vertexBindingDescriptionCount = 1;
+       lineVertexInputInfo.vertexAttributeDescriptionCount = 2;
+       lineVertexInputInfo.pVertexBindingDescriptions = &VertextTrianlge2Ddescription;
+       lineVertexInputInfo.pVertexAttributeDescriptions = VertextTrianlge2DAttributes;
+
+       pipelineInfo.pInputAssemblyState = &lineInputAssembly;
+       pipelineInfo.pVertexInputState = &lineVertexInputInfo;
+
+       check_err(vkCreateGraphicsPipelines(vulkan_info.device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &(vulkan_info.lineGraphicsPipeline)), "failed to create graphics pipeline!");
        
 
        vkDestroyShaderModule(vulkan_info.device, fragShaderModule, NULL);
@@ -2301,7 +2352,12 @@ Custimizing the Compute shader
               - Make graphics commands take in compute output for that frame, draw non-indexed with amt = n_particles
 
 
-
+Adding a pipeline for lines.
+       - Will need a new pipeline to execute every renderpass
+       - This can be done in parralel with the trianlge submission
+              - Bind the line_graphics_pipeline
+              - Bind the line buffer
+              (re-using the vertex buffer we created last time as now the triangle buffers come from compute)
 
 NOTES
        - No Callback to recreate swap chain
