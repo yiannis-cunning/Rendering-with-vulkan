@@ -125,6 +125,10 @@ void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 
 VkShaderModule make_shader_module(const char *filename);
 
+void init_particles();
+
+
+
 
 void *safe_calloc(uint32_t size, uint32_t amt);
 
@@ -208,6 +212,9 @@ typedef struct vulkan_instance_t{
        VkBuffer                    *shaderStorageBuffers;             // Where the particles[] are stored.
        VkDeviceMemory              *shaderStorageBuffersMemory;       // ^
 
+       VkBuffer                    shaderIndexBuffer;
+       VkDeviceMemory              shaderIndexBufferMemory;
+
        VkBuffer                    *computeUniformBuffers;
        VkDeviceMemory              *computeUniformBuffersMemory;
        void                        **computeUniformBuffersMapped;
@@ -220,7 +227,6 @@ typedef struct vulkan_instance_t{
 
 
        /* line pipline */
-
        VkPipeline                  lineGraphicsPipeline;
 
 
@@ -260,6 +266,9 @@ VkFormat findDepthFormat(){     // Find a format with these properties, supporte
 
 
 void vulkan_run(){
+
+       init_particles();
+
        // 1. Init
        printf("\n1) Creating Vulkan instance\n");
        createInstance();           // No layers configured or debug -> extensions given by get_wind_extensions_sec()
@@ -414,6 +423,7 @@ typedef struct partical_t{
 
 static uint32_t n_particles = 12;
 
+
 static partical_t particles[] = {
        {(vector4_t){0, 0, 1}, (vector4_t){0, 0, 1}, (vector4_t){1, 1, 0}},
        {(vector4_t){1, 1, 1}, (vector4_t){0, 0, 1}, (vector4_t){1, 1, 0}},
@@ -431,6 +441,53 @@ static partical_t particles[] = {
        {(vector4_t){-1, 1, -0.5}, (vector4_t){0, 0, -1}, (vector4_t){1, 1, 0}},
        {(vector4_t){0, 1, -0.5}, (vector4_t){0, 0, -1}, (vector4_t){1, 1, 0}},
 };
+
+static partical_t *particles_new = particles;
+
+static uint32_t *particle_indxs = NULL;
+static uint32_t n_particle_indxs = 0;
+
+float f(float x, float y){
+       return 3*exp(-1*(x*x + y*y)); // Guassian with height of 10 at origin
+}
+
+void init_particles(){
+       // 10x10 with points every 0.1
+       // start is -5, -5 and going to 5,5 
+       n_particles = 101*101;
+       particles_new = (partical_t *)calloc(n_particles, sizeof(partical_t));
+       partical_t point;
+
+       int i = 0;
+       float x;
+       float y;
+       for(int yi = 0; yi <= 100; yi += 1){
+              for(int xi = 0; xi <= 100; xi += 1){
+                     x = -5 + 0.1*xi;
+                     y = -5 + 0.1*yi;
+
+                     particles_new[i] = (partical_t) { (vector4_t) {x, y, f(x, y), 0}, (vector4_t) {0, 0, 0, 0}, (vector4_t) {1, 1, 0, 0}};
+                     i += 1;
+              }
+       }
+
+       // 100x100x2 trigs * 3 indxes/trig
+       n_particle_indxs = 100*100*6;
+       particle_indxs = (uint32_t *)calloc(sizeof(uint32_t), n_particle_indxs);
+       i = 0;
+       for(int yi = 0; yi < 100; yi += 1){
+              for(int xi = 0; xi < 100; xi += 1){
+                     particle_indxs[i] = xi + yi*101;
+                     particle_indxs[i + 1] = (xi + 1) + yi*101;
+                     particle_indxs[i + 2] = (xi + 1) + (yi + 1)*101;
+
+                     particle_indxs[i + 3] = xi + yi*101;
+                     particle_indxs[i + 4] = xi  + (yi + 1)*101;
+                     particle_indxs[i + 5] = (xi + 1) + (yi + 1)*101;
+                     i += 6;
+              }
+       }
+}
 
 /*
 Here to specify the format of the partical buffer array - only for graphics pipline part.
@@ -465,7 +522,7 @@ void createShaderStorageBuffers(){
        // 3. Copy to the temp, cpu local, buffer
        void* data;
        vkMapMemory(vulkan_info.device, stagingBufferMemory, 0, bufferSize, 0, &data);
-       memcpy(data, particles, (size_t)bufferSize);
+       memcpy(data, particles_new, (size_t)bufferSize);
        vkUnmapMemory(vulkan_info.device, stagingBufferMemory);
 
 
@@ -939,6 +996,33 @@ void createIndexBuffer(){
 
        vkDestroyBuffer(vulkan_info.device, stagingBuffer, NULL);
        vkFreeMemory(vulkan_info.device, stagingBufferMemory, NULL);
+
+
+
+       bufferSize = sizeof(particle_indxs[0]) * n_particle_indxs;
+
+       // 1. Create a temprorty buffer to copy from
+
+       createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, \
+              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, \
+              &stagingBuffer, &stagingBufferMemory);
+       // 2. copy to tempororay buffer
+       vkMapMemory(vulkan_info.device, stagingBufferMemory, 0, bufferSize, 0, &data);
+       memcpy(data, particle_indxs, (size_t) bufferSize);
+       vkUnmapMemory(vulkan_info.device, stagingBufferMemory);
+
+       // 3. craete a device buffer
+       createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT /* Its a index buffer and want to transfer too it*/, \
+              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, \
+              &(vulkan_info.shaderIndexBuffer), &(vulkan_info.shaderIndexBufferMemory));
+
+       // 4. Copy via gpu commands
+       copyBuffer(stagingBuffer, vulkan_info.shaderIndexBuffer, bufferSize);
+
+       vkDestroyBuffer(vulkan_info.device, stagingBuffer, NULL);
+       vkFreeMemory(vulkan_info.device, stagingBufferMemory, NULL);
+
+
        
 }
 
@@ -1243,15 +1327,15 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, scr
        VkDeviceSize offsets[] = {0};
        vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vulkan_info.shaderStorageBuffers[vulkan_info.currentFrame], offsets); // vertexBuffers
 
-       //vkCmdBindIndexBuffer(commandBuffer, vulkan_info.indexBuffer, 0, VK_INDEX_TYPE_UINT16); /* 16 is the type of index data (we dont have very big vertex array right now*/
+       vkCmdBindIndexBuffer(commandBuffer, vulkan_info.shaderIndexBuffer, 0, VK_INDEX_TYPE_UINT32); /* 16 is the type of index data (we dont have very big vertex array right now*/
 
        updateUniformBuffer(vulkan_info.currentFrame, screen);
 
        
        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_info.pipelineLayout, 0, 1/*descriptorSetCount*/, &(vulkan_info.descriptorSets[vulkan_info.currentFrame]), 0, NULL);
        
-       vkCmdDraw(commandBuffer, n_particles, 1, 0, 0); // n_verticies
-       //vkCmdDrawIndexed(commandBuffer, n_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
+       //vkCmdDraw(commandBuffer, n_particles, 1, 0, 0); // n_verticies
+       vkCmdDrawIndexed(commandBuffer, n_particle_indxs, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
 
        
 
@@ -2358,6 +2442,10 @@ Adding a pipeline for lines.
               - Bind the line_graphics_pipeline
               - Bind the line buffer
               (re-using the vertex buffer we created last time as now the triangle buffers come from compute)
+
+
+2D waves
+       - Make many more particles/points to cover a set feild.
 
 NOTES
        - No Callback to recreate swap chain

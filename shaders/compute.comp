@@ -38,5 +38,21 @@ void main(){
 
        particlesOut[index].position = particleIn.position + (particleIn.speed)*ubo.deltaTime;
        particlesOut[index].speed = particleIn.speed - 1*vec3(0, 0, particleIn.position.z*ubo.deltaTime);
+
+       vec3 clrnext = vec3( 
+              floor(particleIn.position.z) == 0 || floor(particleIn.position.z) == -3, 
+              floor(particleIn.position.z) == 1 || floor(particleIn.position.z) == -1,
+              floor(particleIn.position.z) == 2 || floor(particleIn.position.z) == -2);
+
+/*       float factor =  sqrt(particleIn.position.z)/4;
+       if(particleIn.position.z > 0){
+              clrnext.y = 1 - factor;
+              clrnext.z = 1 - factor;
+       } else{
+              clrnext.x = 1 - factor;
+              clrnext.y = 1 - factor;
+       }*/
+       particlesOut[index].color = clrnext;
+
        //particlesOut[index].position = vec3(0, 0, 0);
 }
