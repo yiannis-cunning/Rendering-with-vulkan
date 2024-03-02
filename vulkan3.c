@@ -409,8 +409,9 @@ void *resize(void *allocation, uint32_t new_sz){
 
 
 
-typedef struct compute_ubo_t{
+typedef struct compute_ubo_t{ // alighend for 4 floats?
        float deltaTime;
+
 } compute_ubo_t;
 
 
@@ -2443,9 +2444,13 @@ Adding a pipeline for lines.
               - Bind the line buffer
               (re-using the vertex buffer we created last time as now the triangle buffers come from compute)
 
-
 2D waves
        - Make many more particles/points to cover a set feild.
+
+
+Making better 2D waves
+       - caluculate accelaeration based on surrounding paricles a = c*(d_pxpy + d_nxpy + d_pxny + d_nxny)
+       - will need to know bounds of the particle array in both x and y dimensions
 
 NOTES
        - No Callback to recreate swap chain
