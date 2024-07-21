@@ -78,6 +78,15 @@ int main(int argc, char *argv[]){
        screen.fov = 45;
        screen.clipDist = 1;
        screen.renderDist = 100;
+       
+       screen.char_grid_dims[0] = 10;
+       screen.char_grid_dims[1] = 10;
+       screen.n_characters = 10;
+       screen.characters = (charcter_t *) calloc(sizeof(charcter_t), 10);
+       screen.characters[0] = (charcter_t){'a', {0, 0}};
+       screen.characters[1] = (charcter_t){'b', {0, 1}};
+       screen.characters[2] = (charcter_t){'c', {0, 2}};
+
 
 
        if (!glfwInit()){

@@ -71,6 +71,8 @@ void createComputeDescriptorSets();
 
 void createShaderStorageBuffers();
 
+void createShaderStorageBuffers2();
+
 void createComputeUniformBuffers();
 
 void recordComputeCommandBuffer(VkCommandBuffer commandBuffer);
@@ -127,13 +129,30 @@ VkShaderModule make_shader_module(const char *filename);
 
 void init_particles();
 
+void static_data_setup();
+
+void create2dInputBuffers();
+
+void createGPUBuffer();
 
 
 
 void *safe_calloc(uint32_t size, uint32_t amt);
 
+typedef struct local_screen_data_t{
+       // 1) Text area
+       vector4_t text_bounds;
+
+} local_screen_data_t;
+
+
+
+
 // 3) local/private variables
 typedef struct vulkan_instance_t{
+
+       local_screen_data_t static_data;
+
        // Device + instance
        VkInstance           pInstance;
        VkSurfaceKHR         surface;
@@ -212,6 +231,9 @@ typedef struct vulkan_instance_t{
        VkBuffer                    *shaderStorageBuffers;             // Where the particles[] are stored.
        VkDeviceMemory              *shaderStorageBuffersMemory;       // ^
 
+       VkBuffer                    *shaderStorageBuffers_3dgrid;             // Bigger allocation for 3D grid - will store 2x 4 vectors per point
+       VkDeviceMemory              *shaderStorageBuffersMemory_3dgrid;       // ^
+
        VkBuffer                    shaderIndexBuffer;
        VkDeviceMemory              shaderIndexBufferMemory;
 
@@ -228,6 +250,16 @@ typedef struct vulkan_instance_t{
 
        /* line pipline */
        VkPipeline                  lineGraphicsPipeline;
+
+       /* 2D stuff pipeline */
+       VkPipeline                  twodGraphicsPipeline;
+
+       VkBuffer                    twodvertexBuffer;
+       VkDeviceMemory              twodvertexBufferMemory;
+       VkBuffer                    twodindexBuffer;
+       VkDeviceMemory              twodindexBufferMemory;
+
+       //VkDescriptorSet             twoddescriptorSets;
 
 
        bool framebufferResized;
@@ -268,6 +300,7 @@ VkFormat findDepthFormat(){     // Find a format with these properties, supporte
 void vulkan_run(){
 
        init_particles();
+       static_data_setup();
 
        // 1. Init
        printf("\n1) Creating Vulkan instance\n");
@@ -309,6 +342,7 @@ void vulkan_run(){
 
        printf("\n13)Creating/Allocation buffers for the points\n");
        createShaderStorageBuffers(); // Init to particals []
+       //createShaderStorageBuffers2();
        printf("\n13)Creating/Allocation unifrom buffers\n");
        createComputeUniformBuffers();
        printf("\n14)Allocation The descriptor sets\n");
@@ -320,6 +354,7 @@ void vulkan_run(){
        printf("\n12) Allocating and moving vertex data to GPU\n");
        createVertexBuffer();
        createIndexBuffer();
+       create2dInputBuffers();
 
        /* Uniform buffers*/
        createUniformBuffers();
@@ -400,7 +435,16 @@ void *resize(void *allocation, uint32_t new_sz){
 
 
 
+/*
+typedef struct sample_t{
 
+       
+}*/
+
+
+void static_data_setup(){
+       vulkan_info.static_data.text_bounds = (vector4_t) {0, 900, 500, 910};
+}
 
 
 
@@ -535,6 +579,37 @@ void createShaderStorageBuffers(){
 
 }
 
+/*
+void createShaderStorageBuffers2(){
+       // 1. will need to allocate the saved buffers
+       if(vulkan_info.shaderStorageBuffers_3dgrid != NULL){free(vulkan_info.shaderStorageBuffers_3dgrid);}
+       vulkan_info.shaderStorageBuffers_3dgrid = (VkBuffer *)calloc(sizeof(VkBuffer), MAX_FRAMES_IN_FLIGHT);
+       
+       if(vulkan_info.shaderStorageBuffersMemory_3dgrid != NULL){free(vulkan_info.shaderStorageBuffersMemory_3dgrid);}
+       vulkan_info.shaderStorageBuffersMemory_3dgrid = (VkDeviceMemory *)calloc(sizeof(VkDeviceMemory), MAX_FRAMES_IN_FLIGHT);
+
+       // 2. Create temp staging buffer for initial data
+       VkDeviceSize bufferSize = sizeof(partical_t) * n_particles;
+
+       VkBuffer             stagingBuffer;
+       VkDeviceMemory       stagingBufferMemory;
+       createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, &stagingBuffer, &stagingBufferMemory);
+
+       // 3. Copy to the temp, cpu local, buffer
+       void* data;
+       vkMapMemory(vulkan_info.device, stagingBufferMemory, 0, bufferSize, 0, &data);
+       memcpy(data, particles_new, (size_t)bufferSize);
+       vkUnmapMemory(vulkan_info.device, stagingBufferMemory);
+
+
+       for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+              // 4. Make and copy data from the staging buffer (host) to the shader storage buffer (GPU)
+              createBuffer(bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &(vulkan_info.shaderStorageBuffers[i]), &(vulkan_info.shaderStorageBuffersMemory[i]));
+              copyBuffer(stagingBuffer, vulkan_info.shaderStorageBuffers[i], bufferSize);
+       }
+
+}
+*/
 void createComputePipeline(){
        // Very simple.
        // 1. Make the layout
@@ -926,8 +1001,6 @@ void createDescriptorSets(){
 
 
 
-
-
 /* This section is for handling vertext data
 // Defined in header vulkan3.h
 typedef struct Vertex_t{
@@ -1104,6 +1177,57 @@ void createVertexBuffer(){
        vkFreeMemory(vulkan_info.device, stagingBufferMemory, NULL);
 }
 
+static Vertex_t rectangle_2d[] = {
+       {{-0.9f, 0.9f, 0.0f}, {1.0f, 1.0f, 1.0f}},
+       {{-0.9f, 0.95f, 0.0f}, {1.0f, 1.0f, 1.0f}},
+       {{-0.5f, 0.95f, 0.0f}, {1.0f, 1.0f, 1.0f}},
+       {{-0.5f, 0.9f, 0.0f}, {1.0f, 1.0f, 1.0f}},
+};
+
+const uint16_t indicies_2d[] = {
+       0, 1, 2, 0, 2, 3
+};
+
+
+
+static int n_2d_indicies = 6;
+
+void create2dInputBuffers(){
+ 
+       createGPUBuffer( &(vulkan_info.twodvertexBuffer), &(vulkan_info.twodvertexBufferMemory), sizeof(Vertex_t)*4, rectangle_2d, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+       createGPUBuffer( &(vulkan_info.twodindexBuffer), &(vulkan_info.twodindexBufferMemory), sizeof(uint16_t)*6, indicies_2d, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+}
+
+
+
+void createGPUBuffer(VkBuffer *buffer_dest, VkDeviceMemory *bufferMemory_dest, VkDeviceSize bufferSize, void *src_data, VkBufferUsageFlags usage){
+
+       // 1. Make a new temorary staging buffer.
+       VkBuffer             stagingBuffer;
+       VkDeviceMemory       stagingBufferMemory;
+       
+       createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT /* Can be used as the source of memory transfer*/, \
+              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT /* On the CPU */, \
+              &stagingBuffer, &stagingBufferMemory);
+       
+       void *stagingdata;
+       // 2. Copy over the vertex data to the staging buffer
+       vkMapMemory(vulkan_info.device, stagingBufferMemory, 0, bufferSize, 0, &stagingdata);
+              memcpy(stagingdata, src_data, bufferSize);
+       vkUnmapMemory(vulkan_info.device, stagingBufferMemory);
+       
+       // 3. Create the corresponding vertex buffer. Has the transfer destination bit so this can be transfered too
+       createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | usage, \
+              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT /* On the GPU - Cannot mem map this.*/, \
+              buffer_dest, bufferMemory_dest);
+
+       copyBuffer(stagingBuffer, *buffer_dest, bufferSize);
+
+       vkDestroyBuffer(vulkan_info.device, stagingBuffer, NULL);
+       vkFreeMemory(vulkan_info.device, stagingBufferMemory, NULL);
+
+}
+
 /* NOTE theres a hard limit on concurrent alocations!*/
 void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer *buffer, VkDeviceMemory *bufferMemory) {
        VkBufferCreateInfo bufferInfo = {0};
@@ -1159,6 +1283,7 @@ void recordComputeCommandBuffer(VkCommandBuffer commandBuffer) {
 
 void draw(screenProperties_t screen){
        
+       if(1){
        // 1. Wait for previous submit commands to finish before starting new commands
        vkWaitForFences(vulkan_info.device, 1, &(vulkan_info.computeInFlightFences[vulkan_info.currentFrame]), VK_TRUE, UINT64_MAX);
        // 2. Reset the fences before submitting.
@@ -1183,7 +1308,7 @@ void draw(screenProperties_t screen){
        computeSubmitInfo.pSignalSemaphores = computeSignalSemaphores;
 
        check_err(vkQueueSubmit(vulkan_info.graphicsQueue, 1, &computeSubmitInfo, vulkan_info.computeInFlightFences[vulkan_info.currentFrame]), "failed to submit compute render pass!");
-
+       }
        
 
 
@@ -1213,10 +1338,14 @@ void draw(screenProperties_t screen){
 
        VkSubmitInfo submitInfo = {0};
        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-
+       
+       //VkSemaphore waitSemaphores[1] = { /*vulkan_info.computeFinishedSemaphores[vulkan_info.currentFrame],*/ vulkan_info.imageAvailableSemaphores[vulkan_info.currentFrame] };
+       //VkPipelineStageFlags waitStages[1] = {/*VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,*/ VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+       //submitInfo.waitSemaphoreCount = 1; replace below ((()))
        VkSemaphore waitSemaphores[2] = {vulkan_info.computeFinishedSemaphores[vulkan_info.currentFrame], vulkan_info.imageAvailableSemaphores[vulkan_info.currentFrame] };
        VkPipelineStageFlags waitStages[2] = {VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
        submitInfo.waitSemaphoreCount = 2;
+       
        submitInfo.pWaitSemaphores = waitSemaphores;
        submitInfo.pWaitDstStageMask = waitStages;
 
@@ -1335,7 +1464,7 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, scr
        
        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_info.pipelineLayout, 0, 1/*descriptorSetCount*/, &(vulkan_info.descriptorSets[vulkan_info.currentFrame]), 0, NULL);
        
-       //vkCmdDraw(commandBuffer, n_particles, 1, 0, 0); // n_verticies
+       // vkCmdDraw(commandBuffer, n_particles, 1, 0, 0); // n_verticies
        vkCmdDrawIndexed(commandBuffer, n_particle_indxs, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
 
        
@@ -1353,7 +1482,25 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, scr
        vkCmdDrawIndexed(commandBuffer, n_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
 
 
+       // Want to do 2D stuff now
+       vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_info.twodGraphicsPipeline);
        
+       vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+       
+       vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+       vkCmdBindVertexBuffers(commandBuffer, 0, 1, &vulkan_info.twodvertexBuffer, offsets); 
+       
+       vkCmdBindIndexBuffer(commandBuffer, vulkan_info.twodindexBuffer, 0, VK_INDEX_TYPE_UINT16); /* 16 is the type of index data (we dont have very big vertex array right now*/
+
+  
+       vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_info.pipelineLayout, 0, 1/*descriptorSetCount*/, &(vulkan_info.descriptorSets[vulkan_info.currentFrame]), 0, NULL);
+       
+
+       vkCmdDrawIndexed(commandBuffer, n_2d_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
+
+
+
 
        vkCmdEndRenderPass(commandBuffer);
 
@@ -1732,10 +1879,42 @@ void createGraphicsPipeline() {
        pipelineInfo.pVertexInputState = &lineVertexInputInfo;
 
        check_err(vkCreateGraphicsPipelines(vulkan_info.device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &(vulkan_info.lineGraphicsPipeline)), "failed to create graphics pipeline!");
-       
 
        vkDestroyShaderModule(vulkan_info.device, fragShaderModule, NULL);
        vkDestroyShaderModule(vulkan_info.device, vertShaderModule, NULL);
+
+
+       // 1. shader code - Use the new 2D shaders
+       vertShaderModule = make_shader_module("shaders/vert_2d.spv");
+       fragShaderModule = make_shader_module("shaders/frag_2d.spv");
+
+       vertShaderStageInfo.module = vertShaderModule;          // Correct the pointers
+       fragShaderStageInfo.module = fragShaderModule;
+       shaderStages[0] = vertShaderStageInfo;
+       shaderStages[1] = fragShaderStageInfo;
+
+       // 2. Dont do depth testing
+       depthStencil.depthTestEnable = VK_FALSE;
+       depthStencil.depthWriteEnable = VK_FALSE;
+
+       // 3. Revert changes made for the line one
+       //pipelineInfo.pInputAssemblyState = &inputAssembly;
+       lineInputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+       //pipelineInfo.pVertexInputState = &vertexInputInfo;
+
+       
+       check_err(vkCreateGraphicsPipelines(vulkan_info.device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &(vulkan_info.twodGraphicsPipeline)), "failed to create graphics pipeline!");
+
+       vkDestroyShaderModule(vulkan_info.device, fragShaderModule, NULL);
+       vkDestroyShaderModule(vulkan_info.device, vertShaderModule, NULL);
+
+
+       // We will also want to make a pipline for text rendering
+       //     - Will have a 100x(axb) bitmap of character images -> will be mapping of letters to the array
+       //     - shader will match top-right pixel to correct place in the screen, and then scale proporley
+       //     ie - blit each to the screen - 1 draw call per liekely - give x0/y0 and scale and 
+
+
 }
 
 VkFormat findSupportedFormat(VkFormat *candidates, int n_candidates, VkImageTiling tiling, VkFormatFeatureFlags features) {

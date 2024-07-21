@@ -3,6 +3,10 @@
 
 #include <vulkan/vulkan.h>
 
+typedef struct charcter_t{
+       char index;
+       float pos[2];
+} charcter_t;
 
 
 typedef struct screenProperties_t{
@@ -13,8 +17,11 @@ typedef struct screenProperties_t{
        float renderDist;
        float clipDist;
 
-} screenProperties_t;
+       int n_characters;
+       charcter_t *characters;
+       uint32_t char_grid_dims[2];
 
+} screenProperties_t;
 
 
 void vulkan_run();
