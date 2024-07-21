@@ -45,5 +45,5 @@ run: testing_vulkan.c
 glfw_master: glfw_master.cpp ${IMGUI_C_DIR}\backends\imgui_impl_glfw.cpp ${IMGUI_C_DIR}\backends\imgui_impl_opengl3.cpp
 	${gcc_path} $^ ${IMGUI_CFILS} ${LIB_GLFW} ${INCL_GLFW} ${IMGUI_INCL} ${LINK_OPTS_STD} -o glfw_master.exe
 
-shaders: *
+shaders: shaders/*
 	cd shaders && $(MAKE)

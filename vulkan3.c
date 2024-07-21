@@ -141,13 +141,19 @@ VkShaderModule make_shader_module(const char *filename);
 
 void init_particles();
 
-void create2dInputBuffers();
-
 void create2dpiplineresources();
+
+void updatetwodUniformBuffer(uint32_t currentImage, screenProperties_t screen);
+
+void createGenericUniformBuffers(VkDeviceSize sizeofubo, int n_ubos, VkBuffer **uniformBuffer_out, VkDeviceMemory **unifromMemory_out, void ***uniformMap_out);
 
 void createGPUBuffer();
 
 void *safe_calloc(uint32_t size, uint32_t amt);
+
+void createtwodDescriptorSetLayout();
+
+void createtwodDescriptorSets();
 
 
 
@@ -250,6 +256,7 @@ typedef struct vulkan_instance_t{
        /* line pipline */
        VkPipeline                  lineGraphicsPipeline;
 
+
        /* 2D stuff pipeline */
        VkPipeline                  twodGraphicsPipeline;
 
@@ -258,15 +265,20 @@ typedef struct vulkan_instance_t{
        VkBuffer                    twodindexBuffer;
        VkDeviceMemory              twodindexBufferMemory;
 
-       /* Texture */
+              /* Descriptor sets */
+       VkDescriptorSetLayout       twddescriptorSetLayout;
+       VkPipelineLayout            twodpipelineLayout;
+       VkDescriptorSet             *twoddescriptorSets;
+
        VkImage                     textureImage;
        VkDeviceMemory              textureImageMemory;
        VkImageView                 textureImageView;
 
        VkSampler                   textureSampler;
 
-       //VkDescriptorSet             twoddescriptorSets;
-
+       VkBuffer                    *twoduniformBuffers;
+       VkDeviceMemory              *twoduniformBuffersMemory;
+       void                        **twoduniformBuffersMapped;
 
        bool framebufferResized;
 
@@ -327,17 +339,21 @@ void vulkan_run(){
        createDescriptorSetLayout();
        printf("\n7) Creating renderpass\n"); 
        createRenderPass();
-       printf("\n8) Creating graphics pipeline\n");
+       printf("\n8) Creating a pool for descriptors\n");
+       createDescriptorPool();
+       printf("\n9) Creating a command pool\n");
+       createCommandPool();
+       
+       printf("\n10) Creating 2D pipeline resources\n");
+       create2dpiplineresources();
+
+       printf("\n11) Creating graphics pipeline\n");
        createGraphicsPipeline();
 
 
-       printf("\n10) Creating a command pool\n");
-       createCommandPool();
-       printf("\n11) Createing a buffer for depth\n");
+       printf("\n12) Createing a buffer for depth\n");
        createDepthResources();
 
-       printf("\n12) Creating a pool for descriptors\n");
-       createDescriptorPool();
 
        // 4. Compute
        printf("\n13)Creating a layout for the compute descriptor set\n");
@@ -360,9 +376,6 @@ void vulkan_run(){
        printf("\n12) Allocating and moving vertex data to GPU\n");
        createVertexBuffer();
        createIndexBuffer();
-
-       create2dpiplineresources();
-       //create2dInputBuffers();
 
        /* Uniform buffers*/
        createUniformBuffers();
@@ -929,16 +942,20 @@ void updateUniformBuffer(uint32_t currentImage, screenProperties_t screen){
 
 void createDescriptorPool(){
        // 1. Make size structure
-       VkDescriptorPoolSize poolSize = {0};
-       poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-       poolSize.descriptorCount = MAX_FRAMES_IN_FLIGHT*2;      // 2 for each frame, both compute and graphics
+       VkDescriptorPoolSize poolSizes[2] = {0};
+       poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+       poolSizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT*3;      // 3 for each frame, both compute and graphics, and graphics 2d
+       
+       poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+       poolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT*1;         // only graphics 2d using this
+
 
        // 2. Make pool create structure
        VkDescriptorPoolCreateInfo poolInfo = {0};
        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-       poolInfo.poolSizeCount = 1;
-       poolInfo.pPoolSizes = &poolSize;
-       poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT*2;
+       poolInfo.poolSizeCount = 2;
+       poolInfo.pPoolSizes = poolSizes;
+       poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT*3;
 
        /* use VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT if you want to be able to free descriptor sets*/
        check_err(vkCreateDescriptorPool(vulkan_info.device, &poolInfo, NULL, &(vulkan_info.descriptorPool)), "failed to create descriptor pool!");
@@ -1206,6 +1223,9 @@ void createVertexBuffer(){
        vkFreeMemory(vulkan_info.device, stagingBufferMemory, NULL);
 }
 
+
+
+
 static Vertex_t rectangle_2d[] = {
        {{-0.9f, 0.9f, 0.0f}, {1.0f, 1.0f, 1.0f}},
        {{-0.9f, 0.95f, 0.0f}, {1.0f, 1.0f, 1.0f}},
@@ -1217,9 +1237,12 @@ const uint16_t indicies_2d[] = {
        0, 1, 2, 0, 2, 3
 };
 
-
-
 static int n_2d_indicies = 6;
+
+
+typedef struct twodUBO_t {
+       matrix4cm_t mat4;
+} twodUBO_t;
 
 
 void create2dpiplineresources(){
@@ -1229,16 +1252,164 @@ void create2dpiplineresources(){
        /* 2) Create texture sampler*/
        createTextureSampler();
 
+       printf("   a) Making Unifrom buffers\n");
+       /* 3) Create all host local UBO objects - cann fill them out with the mem map */
+       createGenericUniformBuffers(sizeof(twodUBO_t), MAX_FRAMES_IN_FLIGHT, \
+                            &(vulkan_info.twoduniformBuffers), \
+                            &(vulkan_info.twoduniformBuffersMemory), \
+                            &(vulkan_info.twoduniformBuffersMapped));
+
+       printf("   b) Creating 2D Unifrom layout \n");
+       createtwodDescriptorSetLayout(); /* New descriptor type being used */
+
+       printf("   c) Allocating descriptor sets \n");
+       createtwodDescriptorSets();
+
+       printf("   d) Creating input buffers \n");
+       /* 3) Make descriptor sets
+              - make sure engout space in pool (shared by all pipelines)
+              - Ties in the sampler + image made before 
+              - ties in the ubo buffer made before
+
+       */
+
        /* 3) Input buffers */
        createGPUBuffer( &(vulkan_info.twodvertexBuffer), &(vulkan_info.twodvertexBufferMemory), sizeof(Vertex_t)*4, rectangle_2d, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
        createGPUBuffer( &(vulkan_info.twodindexBuffer), &(vulkan_info.twodindexBufferMemory), sizeof(uint16_t)*6, indicies_2d, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 
 }
-void create2dInputBuffers(){
- 
-       createGPUBuffer( &(vulkan_info.twodvertexBuffer), &(vulkan_info.twodvertexBufferMemory), sizeof(Vertex_t)*4, rectangle_2d, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-       createGPUBuffer( &(vulkan_info.twodindexBuffer), &(vulkan_info.twodindexBufferMemory), sizeof(uint16_t)*6, indicies_2d, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+
+
+
+void updatetwodUniformBuffer(uint32_t currentImage, screenProperties_t screen){
+
+       twodUBO_t ubo = {0};
+
+       matrix4_t model_mat = {0};
+       model_mat.r0 = (vector4_t){0.5, 0, 0, 0};
+       model_mat.r1 = (vector4_t){0, 0.5, 0, 0};
+       model_mat.r2 = (vector4_t){0, 0, 1, 0};
+       model_mat.r3 = (vector4_t){0, 0, 0, 1};
+
+       ubo.mat4 = convertcm(model_mat);
+
+       memcpy(vulkan_info.twoduniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
+
+/* Creates a array of uniform buffers  - will also resize*/ 
+/* Array allowes access to the host buffer, host memory allocation and the memory map to access the content */
+void createGenericUniformBuffers(VkDeviceSize sizeofubo, int n_ubos, VkBuffer **uniformBuffer_out, VkDeviceMemory **unifromMemory_out, void ***uniformMap_out) {
+       
+       VkDeviceSize bufferSize = sizeofubo;
+
+       if(*uniformBuffer_out != NULL){free(*uniformBuffer_out);}
+       *uniformBuffer_out = (VkBuffer *)calloc(sizeof(VkBuffer), n_ubos);
+
+       if(*unifromMemory_out != NULL){free(*unifromMemory_out);}
+       *unifromMemory_out = (VkDeviceMemory *)calloc(sizeof(VkDeviceMemory), n_ubos);
+
+       if(*uniformMap_out != NULL){free(*uniformMap_out);}
+       *uniformMap_out = (void **)calloc(sizeof(void *), 1);
+
+
+       for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+              createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, \
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, \
+                            &((*uniformBuffer_out)[i]), &((*unifromMemory_out)[i]));
+
+              vkMapMemory(vulkan_info.device, (*unifromMemory_out)[i], 0, bufferSize, 0, &((*uniformMap_out)[i]));
+              // Access the memory with uniform buffer mapped, 
+       }
+}
+
+void createtwodDescriptorSetLayout() {
+       VkDescriptorSetLayoutBinding uboLayoutBinding = {0};
+       uboLayoutBinding.binding = 0;
+       uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+       uboLayoutBinding.descriptorCount = 1;
+       uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+       uboLayoutBinding.pImmutableSamplers = NULL; // Optional - multisampling
+
+       VkDescriptorSetLayoutBinding samplerLayoutBinding = {0};
+       samplerLayoutBinding.binding = 1;
+       samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+       samplerLayoutBinding.descriptorCount = 1;
+       samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+       samplerLayoutBinding.pImmutableSamplers = NULL; // Optional - multisampling
+
+       VkDescriptorSetLayoutBinding bindings[2] = {uboLayoutBinding, samplerLayoutBinding};
+
+       VkDescriptorSetLayoutCreateInfo layoutInfo = {0};
+       layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+       layoutInfo.bindingCount = 2;
+       layoutInfo.pBindings = bindings;
+
+       check_err(vkCreateDescriptorSetLayout(vulkan_info.device, &layoutInfo, NULL, &(vulkan_info.twddescriptorSetLayout)), "failed to create 2D descriptor set layout!");
+
+}
+
+void createtwodDescriptorSets(){
+
+       // 1. Specify the layout of the descriptor sets you are making
+       VkDescriptorSetLayout *layouts = (VkDescriptorSetLayout *)calloc(sizeof(VkDescriptorSetLayout), MAX_FRAMES_IN_FLIGHT);
+       for(int i =0; i < MAX_FRAMES_IN_FLIGHT; i += 1){
+              layouts[i] = vulkan_info.twddescriptorSetLayout;
+       }
+
+       // 2. Allocate the descriptor sets
+       VkDescriptorSetAllocateInfo allocInfo = {0};
+       allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+       allocInfo.descriptorPool = vulkan_info.descriptorPool;
+       allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+       allocInfo.pSetLayouts = layouts;
+       if(vulkan_info.twoddescriptorSets != NULL){free(vulkan_info.twoddescriptorSets); }
+       vulkan_info.twoddescriptorSets = (VkDescriptorSet *)calloc(sizeof(VkDescriptorSet), MAX_FRAMES_IN_FLIGHT);
+
+       check_err(vkAllocateDescriptorSets(vulkan_info.device, &allocInfo, vulkan_info.twoddescriptorSets), "failed to allocate descriptor sets!");
+
+       /* Will need to fill up the descriptor sets -> these are 'sets' allocated in the 'pool' are refering to specific vkbuffers (made before)*/
+       for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+              // 3. Fix up refrences to the buffers
+              VkDescriptorBufferInfo bufferInfo = {0};
+              bufferInfo.buffer = vulkan_info.twoduniformBuffers[i];
+              bufferInfo.offset = 0;
+              bufferInfo.range = sizeof(twodUBO_t);
+
+              VkDescriptorImageInfo imageInfo = {0};
+              imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+              imageInfo.imageView = vulkan_info.textureImageView;
+              imageInfo.sampler = vulkan_info.textureSampler;
+
+              // 4. update the sets
+              VkWriteDescriptorSet descriptorWrite0 = {0};
+              descriptorWrite0.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+              descriptorWrite0.dstSet = vulkan_info.twoddescriptorSets[i];
+              descriptorWrite0.dstBinding = 0;
+              descriptorWrite0.dstArrayElement = 0;
+              descriptorWrite0.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; // We are making a uniform buffer descritpr
+              descriptorWrite0.descriptorCount = 1;
+              descriptorWrite0.pBufferInfo = &bufferInfo;
+              descriptorWrite0.pImageInfo = NULL; // Optional
+              descriptorWrite0.pTexelBufferView = NULL; // Optional
+
+              VkWriteDescriptorSet descriptorWrite1 = {0};
+              descriptorWrite1.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+              descriptorWrite1.dstSet = vulkan_info.twoddescriptorSets[i];
+              descriptorWrite1.dstBinding = 1;
+              descriptorWrite1.dstArrayElement = 0;
+              descriptorWrite1.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; // We are making a uniform buffer descritpr
+              descriptorWrite1.descriptorCount = 1;
+              descriptorWrite1.pBufferInfo = NULL;
+              descriptorWrite1.pImageInfo = &imageInfo;
+              descriptorWrite1.pTexelBufferView = NULL; // Optional
+
+              VkWriteDescriptorSet descriptorWrite[2] = {descriptorWrite0, descriptorWrite1};
+
+              vkUpdateDescriptorSets(vulkan_info.device, 2, descriptorWrite, 0, NULL);
+       }
+
+}
+
 
 
 
@@ -1535,9 +1706,11 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, scr
        
        vkCmdBindIndexBuffer(commandBuffer, vulkan_info.twodindexBuffer, 0, VK_INDEX_TYPE_UINT16); /* 16 is the type of index data (we dont have very big vertex array right now*/
 
-  
-       vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_info.pipelineLayout, 0, 1/*descriptorSetCount*/, &(vulkan_info.descriptorSets[vulkan_info.currentFrame]), 0, NULL);
-       
+       //printf("\n Before\n");
+       updatetwodUniformBuffer(vulkan_info.currentFrame, screen);
+       //printf("\n After\n");
+       vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_info.twodpipelineLayout, 0, 1/*descriptorSetCount*/, &(vulkan_info.twoddescriptorSets[vulkan_info.currentFrame]), 0, NULL);
+
 
        vkCmdDrawIndexed(commandBuffer, n_2d_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
 
@@ -1925,6 +2098,13 @@ void createGraphicsPipeline() {
        vkDestroyShaderModule(vulkan_info.device, fragShaderModule, NULL);
        vkDestroyShaderModule(vulkan_info.device, vertShaderModule, NULL);
 
+
+
+
+       // 2D PIPELINE
+       pipelineLayoutInfo.pSetLayouts = &(vulkan_info.twddescriptorSetLayout);
+       check_err(vkCreatePipelineLayout(vulkan_info.device, &pipelineLayoutInfo, NULL, &(vulkan_info.twodpipelineLayout)), "failed to create pipeline layout!");
+       pipelineInfo.layout = vulkan_info.twodpipelineLayout;
 
        // 1. shader code - Use the new 2D shaders
        vertShaderModule = make_shader_module("shaders/vert_2d.spv");

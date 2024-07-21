@@ -14,5 +14,5 @@ layout(binding = 0) uniform UniformBufferObject {       // Do some translations 
 
 void main() {
     fragColor = color;
-    gl_Position =  vec4(pos, 1.0); // ubo.translation * vec4(pos, 1.0);
+    gl_Position =  ubo.translation * vec4(pos, 1.0); // ubo.translation * vec4(pos, 1.0);
 }
