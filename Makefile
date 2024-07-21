@@ -5,6 +5,8 @@ glslc_path = C:\VulkanSDK\1.3.268.0\Bin\glslc.exe
 LIB_GLFW = -L C:\clibs\GLFW\lib-mingw-w64 -lglfw3 -lgdi32
 INCL_GLFW = -I C:\clibs\GLFW\include
 
+INCL_STB = -I src\
+
 LIB_VULKAN =  -L C:\VulkanSDK\1.3.268.0\Lib -lvulkan-1
 INCL_VULKAN = -I C:\VulkanSDK\1.3.268.0\Include
 
@@ -24,7 +26,7 @@ LINALG_C = C:\clibs\math\linalg.c
 LINK_OPTS_STD = -L C:\Users\yiann\Desktop\installing_mingw_64-master\mingw64\bin -lstdc++ -lopengl32
 
 glfw_wind: glfw_main.c vulkan3.c ${LINALG_C}
-	${gcc_path} $^ ${LIB_GLFW} ${INCL_GLFW} ${LIB_VULKAN} ${INCL_VULKAN} ${LINALG_INCL} -o glfw_wind.exe
+	${gcc_path} $^ ${LIB_GLFW} ${INCL_GLFW} ${LIB_VULKAN} ${INCL_VULKAN} ${LINALG_INCL} ${INCL_STB} -o glfw_wind.exe
 
 
 

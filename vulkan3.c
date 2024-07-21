@@ -8,6 +8,8 @@
 #include <fcntl.h>
 #include <time.h>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
 #include "glfw_main.h"
 #include "vulkan3.h"
@@ -79,8 +81,6 @@ void recordComputeCommandBuffer(VkCommandBuffer commandBuffer);
 
 void createVertexBuffer();
 
-
-
 void createCommandPool();
 
 void createColorResources();
@@ -111,6 +111,16 @@ void createDescriptorSets();
 
 void draw(screenProperties_t screen);
 
+VkCommandBuffer beginSingleTimeCommands();
+
+void endSingleTimeCommands(VkCommandBuffer commandBuffer);
+
+/* Create texture vkImage from a image file*/
+void createTextureImage(char *filename);
+
+void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+
+void createTextureSampler();
 
 // helper
 uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
@@ -125,33 +135,25 @@ void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyF
 
 void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 
+void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+
 VkShaderModule make_shader_module(const char *filename);
 
 void init_particles();
 
-void static_data_setup();
-
 void create2dInputBuffers();
+
+void create2dpiplineresources();
 
 void createGPUBuffer();
 
-
-
 void *safe_calloc(uint32_t size, uint32_t amt);
-
-typedef struct local_screen_data_t{
-       // 1) Text area
-       vector4_t text_bounds;
-
-} local_screen_data_t;
-
 
 
 
 // 3) local/private variables
 typedef struct vulkan_instance_t{
 
-       local_screen_data_t static_data;
 
        // Device + instance
        VkInstance           pInstance;
@@ -201,10 +203,7 @@ typedef struct vulkan_instance_t{
        VkDeviceMemory       depthImageMemory;
 
        uint32_t             mipLevels;
-       VkSampler            textureSampler;
-       VkImage              textureImage;
-       VkImageView          textureImageView;
-       VkDeviceMemory       textureImageMemory;
+
 
        // Vertex data
        VkBuffer             vertexBuffer;
@@ -259,6 +258,13 @@ typedef struct vulkan_instance_t{
        VkBuffer                    twodindexBuffer;
        VkDeviceMemory              twodindexBufferMemory;
 
+       /* Texture */
+       VkImage                     textureImage;
+       VkDeviceMemory              textureImageMemory;
+       VkImageView                 textureImageView;
+
+       VkSampler                   textureSampler;
+
        //VkDescriptorSet             twoddescriptorSets;
 
 
@@ -300,7 +306,6 @@ VkFormat findDepthFormat(){     // Find a format with these properties, supporte
 void vulkan_run(){
 
        init_particles();
-       static_data_setup();
 
        // 1. Init
        printf("\n1) Creating Vulkan instance\n");
@@ -351,10 +356,13 @@ void vulkan_run(){
        printf("\n9) Createing a frambuffer for each image in swap chain.\n");
        createFramebuffers();
 
+
        printf("\n12) Allocating and moving vertex data to GPU\n");
        createVertexBuffer();
        createIndexBuffer();
-       create2dInputBuffers();
+
+       create2dpiplineresources();
+       //create2dInputBuffers();
 
        /* Uniform buffers*/
        createUniformBuffers();
@@ -431,21 +439,6 @@ void *resize(void *allocation, uint32_t new_sz){
        if(allocation != NULL){free(allocation);}
        return safe_calloc(new_sz, 1);
 }
-
-
-
-
-/*
-typedef struct sample_t{
-
-       
-}*/
-
-
-void static_data_setup(){
-       vulkan_info.static_data.text_bounds = (vector4_t) {0, 900, 500, 910};
-}
-
 
 
 
@@ -1099,14 +1092,7 @@ void createIndexBuffer(){
 
        
 }
-
-
-
-
-// --> Copy data from a source buffer to a destination buffer. Buffers must be compatable
-void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
-       // You will do this through vkCmds! -> for preformance reasons you can also allocate new pool with specific flags
-
+VkCommandBuffer beginSingleTimeCommands(){
        // 1. Allocate a new command buffer that the cpy cmd will be on.
        VkCommandBufferAllocateInfo allocInfo = {0};
        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -1124,14 +1110,10 @@ void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; /*Only will submit one time*/
 
        vkBeginCommandBuffer(commandBuffer, &beginInfo);
+       return commandBuffer;
+}
 
-       // 3. There is only 1 copy command that will be executred
-       VkBufferCopy copyRegion = {0};
-       copyRegion.srcOffset = 0; // Optional
-       copyRegion.dstOffset = 0; // Optional
-       copyRegion.size = size;
-       vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-
+void endSingleTimeCommands(VkCommandBuffer commandBuffer){
        vkEndCommandBuffer(commandBuffer);
 
        // 4. Submit this command buffer
@@ -1147,6 +1129,53 @@ void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
        vkFreeCommandBuffers(vulkan_info.device, vulkan_info.commandPool, 1, &commandBuffer);
 }
 
+
+
+// --> Copy data from a source buffer to a destination buffer. Buffers must be compatable
+void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size) {
+       // You will do this through vkCmds! -> for preformance reasons you can also allocate new pool with specific flags
+
+       VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+       // 3. There is only 1 copy command that will be executred
+       VkBufferCopy copyRegion = {0};
+       copyRegion.srcOffset = 0; // Optional
+       copyRegion.dstOffset = 0; // Optional
+       copyRegion.size = size;
+       vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+       endSingleTimeCommands(commandBuffer);
+}
+
+void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height){
+       VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+       VkBufferImageCopy region = {0};
+       region.bufferOffset = 0;
+       region.bufferRowLength = 0;
+       region.bufferImageHeight = 0;
+
+       region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+       region.imageSubresource.mipLevel = 0;
+       region.imageSubresource.baseArrayLayer = 0;
+       region.imageSubresource.layerCount = 1;
+
+       region.imageOffset = (VkOffset3D) {0, 0, 0};
+       region.imageExtent = (VkExtent3D) {
+              width,
+              height,
+              1
+       };
+       vkCmdCopyBufferToImage(
+              commandBuffer,
+              buffer,
+              image,
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              1,
+              &region
+       );
+       endSingleTimeCommands(commandBuffer);
+}
 
 void createVertexBuffer(){
 
@@ -1192,6 +1221,19 @@ const uint16_t indicies_2d[] = {
 
 static int n_2d_indicies = 6;
 
+
+void create2dpiplineresources(){
+       /* 1) Create and upload image to GPU*/
+       createTextureImage("textures\\lucidagrande.bmp");
+
+       /* 2) Create texture sampler*/
+       createTextureSampler();
+
+       /* 3) Input buffers */
+       createGPUBuffer( &(vulkan_info.twodvertexBuffer), &(vulkan_info.twodvertexBufferMemory), sizeof(Vertex_t)*4, rectangle_2d, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+       createGPUBuffer( &(vulkan_info.twodindexBuffer), &(vulkan_info.twodindexBufferMemory), sizeof(uint16_t)*6, indicies_2d, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+
+}
 void create2dInputBuffers(){
  
        createGPUBuffer( &(vulkan_info.twodvertexBuffer), &(vulkan_info.twodvertexBufferMemory), sizeof(Vertex_t)*4, rectangle_2d, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
@@ -2269,7 +2311,10 @@ int isDeviceSuitable(VkPhysicalDevice device) {
        print_phyDevice(pProperties.deviceName);
        #endif
 
+       VkPhysicalDeviceFeatures supportedFeatures;
+       vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
 
+       if( ! supportedFeatures.samplerAnisotropy) {return -1;}
        // Need the following things:
        // 1) All extensions by window are supported by device
        // 2) There exists a queue family that supports a) graphics family + b) the window you are using
@@ -2541,6 +2586,125 @@ void check_err(VkResult retval, const char *s){
 void *safe_calloc(uint32_t size, uint32_t amt){
        void *temp = calloc(size, amt);
        passert(temp != NULL, "Allocating space");
+}
+
+void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+       VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+       VkImageMemoryBarrier barrier = {0};
+       barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+       barrier.oldLayout = oldLayout;
+       barrier.newLayout = newLayout;
+       barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+       barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+       barrier.image = image;
+       barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+       barrier.subresourceRange.baseMipLevel = 0;
+       barrier.subresourceRange.levelCount = 1;
+       barrier.subresourceRange.baseArrayLayer = 0;
+       barrier.subresourceRange.layerCount = 1;
+       barrier.srcAccessMask = 0; // TODO
+       barrier.dstAccessMask = 0; // TODO
+
+       VkPipelineStageFlags sourceStage;
+       VkPipelineStageFlags destinationStage;
+
+       if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+              barrier.srcAccessMask = 0;
+              barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+              sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+              destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+       } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+              barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+              barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+              sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+              destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+       } else {
+              passert(false, "unsupported layout transition!");
+       }
+
+       vkCmdPipelineBarrier(
+              commandBuffer,
+              sourceStage, destinationStage,
+              0,
+              0, NULL,
+              0, NULL,
+              1, &barrier
+       );
+       endSingleTimeCommands(commandBuffer);
+}
+
+
+void createTextureImage(char *filename){
+       
+       int texWidth, texHeight, texChannels;
+       stbi_uc* pixels = stbi_load(filename, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha); // raw pixel array 
+       VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+       passert(pixels != NULL, "failed to load texture image!");
+
+       // Make a staging buffer 
+       VkBuffer stagingBuffer;
+       VkDeviceMemory stagingBufferMemory;
+
+       createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, \
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, \
+                     &stagingBuffer, &stagingBufferMemory);
+
+       void* data;
+       vkMapMemory(vulkan_info.device, stagingBufferMemory, 0, imageSize, 0, &data);
+              memcpy(data, pixels, (size_t)(imageSize));
+       vkUnmapMemory(vulkan_info.device, stagingBufferMemory);
+
+       stbi_image_free(pixels);
+
+       // Make a new 'image' type 
+
+
+       createImage(texWidth, texHeight, 1, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R8G8B8A8_SRGB, \
+              VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, \
+              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &(vulkan_info.textureImage), &(vulkan_info.textureImageMemory));
+
+       transitionImageLayout(vulkan_info.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+       copyBufferToImage(stagingBuffer, vulkan_info.textureImage, (uint32_t)(texWidth), (uint32_t)(texHeight));
+       transitionImageLayout(vulkan_info.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+       vkDestroyBuffer(vulkan_info.device, stagingBuffer, NULL);
+       vkFreeMemory(vulkan_info.device, stagingBufferMemory, NULL);
+
+       vulkan_info.textureImageView = createImageView(vulkan_info.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+       
+}
+
+
+
+void createTextureSampler(){
+       // https://vulkan-tutorial.com/Texture_mapping/Image_view_and_sampler
+       VkSamplerCreateInfo samplerInfo = {0};
+       samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+       samplerInfo.magFilter = VK_FILTER_LINEAR;
+       samplerInfo.minFilter = VK_FILTER_LINEAR;
+       samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+       samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+       samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+       VkPhysicalDeviceProperties properties = {0};
+       vkGetPhysicalDeviceProperties(vulkan_info.phyDevice, &properties);
+       samplerInfo.anisotropyEnable = VK_TRUE;
+       samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+
+       samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+       samplerInfo.unnormalizedCoordinates = VK_FALSE;
+       samplerInfo.compareEnable = VK_FALSE;
+       samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+
+       samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+       samplerInfo.mipLodBias = 0.0f;
+       samplerInfo.minLod = 0.0f;
+       samplerInfo.maxLod = 0.0f;
+
+       passert(vkCreateSampler(vulkan_info.device, &samplerInfo, NULL, &(vulkan_info.textureSampler)) == VK_SUCCESS, "failed to create texture sampler!");
 }
 
 

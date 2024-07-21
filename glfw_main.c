@@ -3,7 +3,6 @@
 #include <GLFW/glfw3.h>
 #include "linalg.h"
 
-
 static GLFWwindow* window;
 static screenProperties_t screen;
 
@@ -78,7 +77,7 @@ int main(int argc, char *argv[]){
        screen.fov = 45;
        screen.clipDist = 1;
        screen.renderDist = 100;
-       
+
        screen.char_grid_dims[0] = 10;
        screen.char_grid_dims[1] = 10;
        screen.n_characters = 10;
