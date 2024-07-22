@@ -1731,27 +1731,24 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, scr
        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_info.twodpipelineLayout, 0, 1/*descriptorSetCount*/, &(vulkan_info.twoddescriptorSets[vulkan_info.currentFrame]), 0, NULL);
 
        push_const_t tmp = {0};
-       tmp.offst[0] = 0.1f;
-       tmp.offst[1] = 0.1f;
-       tmp.screen_offst[0] = 0.05f;
-       tmp.screen_offst[1] = 0.0f;
 
-       float xs[11] = {0, 7, 4, 4, 7, 0, 5, 7, 0, 4, 6};
-       float ys[11] = {4, 3, 4, 4, 4, 0, 5, 4, 5, 4, 3};
-
-       for(int i = 0; i < 11; i += 1){
-
-              tmp.offst[0] = xs[i]*0.1f;
-              tmp.offst[1] = ys[i]*0.1f;
+       float d_screen_char = 0.05;
+       int i = 0;
+       charcter_t chr = {0};
+       chr = screen.chars[i];
+       while(chr.index < 100){
+              //printf("Character index: %d\n", chr.index);
+              tmp.screen_offst[0] = d_screen_char*chr.pos[0];
+              tmp.screen_offst[1] = d_screen_char*chr.pos[1];
+              tmp.offst[0] = (chr.index % 10)*0.1f;
+              tmp.offst[1] = ((int) (chr.index / 10))*0.1f;
               vkCmdPushConstants(commandBuffer, vulkan_info.twodpipelineLayout, \
                      VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push_const_t), &tmp);
 
               vkCmdDrawIndexed(commandBuffer, n_2d_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
-
-              tmp.screen_offst[0] += 0.05;
-
+              i += 1;
+              chr = screen.chars[i];
        }
-
 
 
        vkCmdEndRenderPass(commandBuffer);

@@ -2,9 +2,13 @@
 #include "vulkan3.h"
 #include <GLFW/glfw3.h>
 #include "linalg.h"
+#include <string.h>
 
 static GLFWwindow* window;
 static screenProperties_t screen;
+
+
+void add_chr_screen(char *str, int n_chars);
 
 VkResult get_wind_surface_spec(VkSurfaceKHR *surface, VkInstance instance){
        return glfwCreateWindowSurface(instance, window, NULL, surface);
@@ -34,6 +38,12 @@ float get_delta_frame_time(){
        
 }
 
+void bkspc(){
+       if(screen.n_chars != 0 && screen.chars != NULL){
+              screen.chars[screen.n_chars - 1].index = 255;
+              screen.n_chars = screen.n_chars -1;
+       }
+}
 
 static float dist = 8.66;
 static float dirc[3] = {1, 1, 1};
@@ -62,6 +72,17 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
                      zvalue -= 0.1;
                      break;
        }
+
+       if(action == GLFW_PRESS){
+              if(key == GLFW_KEY_BACKSPACE){
+                     bkspc();
+              } else {
+                     char buf[1];
+                     buf[0] = (char) key;
+                     add_chr_screen(buf, 1);
+              }
+       }
+
        float offset[3] = {10, 10, zvalue};
        offset[0] = sqrt(200)*cos(theta);
        offset[1] = sqrt(200)*sin(theta);
@@ -71,20 +92,47 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 
 
 
+void add_chr_screen(char *str, int n_chars){
+       if(screen.chars == NULL || screen.chars_sz <= screen.n_chars + n_chars){
+              printf("Resizeing %d, %d\n\n", screen.n_chars, n_chars);
+              charcter_t *old = screen.chars;
+              screen.chars = (charcter_t *)calloc((n_chars + screen.chars_sz )*2, sizeof(charcter_t));
+              screen.chars_sz = (n_chars + screen.chars_sz )*2;
+
+              if(old != NULL) {
+                     memcpy(screen.chars, old, sizeof(charcter_t)*screen.n_chars);
+                     free(old);
+              }
+
+       }
+       for(int i = screen.n_chars; i <  screen.n_chars + n_chars ; i += 1){
+              screen.chars[i].pos[0] = i;
+              screen.chars[i].pos[1] = 0;
+
+              if(str[i - screen.n_chars] >= 'a' && str[i - screen.n_chars] <= 'z'){
+                     screen.chars[i].index = str[i - screen.n_chars] - 'a' + 65;
+              } else if(str[i - screen.n_chars] >= 'A' && str[i - screen.n_chars] <= 'Z'){
+                     screen.chars[i].index = str[i - screen.n_chars] - 'A' + 33;
+              } else{
+                     screen.chars[i].index = 10;
+              }
+       }
+       screen.chars[screen.n_chars + n_chars].index = 255;
+       screen.n_chars = screen.n_chars + n_chars;
+
+}
+
+
 int main(int argc, char *argv[]){
        setvector_t(screen.offset, 10, 10, 10);
        setvector_t(screen.view, -1, -1, -1);
        screen.fov = 45;
        screen.clipDist = 1;
        screen.renderDist = 100;
+       add_chr_screen("Hello World", 11);
+       //printf("a: %d vs %d", 'A', GLFW_KEY_A);
+       //exit(1);
 
-       screen.char_grid_dims[0] = 10;
-       screen.char_grid_dims[1] = 10;
-       screen.n_characters = 10;
-       screen.characters = (charcter_t *) calloc(sizeof(charcter_t), 10);
-       screen.characters[0] = (charcter_t){'a', {0, 0}};
-       screen.characters[1] = (charcter_t){'b', {0, 1}};
-       screen.characters[2] = (charcter_t){'c', {0, 2}};
 
 
 
@@ -101,7 +149,8 @@ int main(int argc, char *argv[]){
        
        printf("Finished starting vulkan... Entering main loop\n");
        while (!glfwWindowShouldClose(window)){
-              glfwPollEvents();
+              glfwPollEvents();    // Update pressing
+                                   // Update screen
               vulkan_drawFrame(screen);
               printf("\rDist: %f, theta: %f, fov %f", dist, theta, screen.fov);
 
