@@ -1242,10 +1242,10 @@ static VkVertexInputAttributeDescription VertextTrigTex2DAttributes[3] = {
 
 
 static Vertex_tex_t rectangle_2d[] = {
-       {{-0.9f, 0.1f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.1f, 0.1f}},
-       {{-0.9f, 0.95f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.1f, 0.2f}},
-       {{-0.5f, 0.95f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.2f, 0.2f}},
-       {{-0.5f, 0.1f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.2f, 0.1f}},
+       {{-0.9f, 0.9f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.1f, 0.0f}},
+       {{-0.9f, 0.95f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.1f, 0.1f}},
+       {{-0.95f, 0.95f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.1f}},
+       {{-0.95f, 0.9f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
 };
 
 const uint16_t indicies_2d[] = {
@@ -1259,6 +1259,10 @@ typedef struct twodUBO_t {
        matrix4cm_t mat4;
 } twodUBO_t;
 
+typedef struct push_const_t {
+       float offst[2];
+       float screen_offst[2];
+} push_const_t;
 
 void create2dpiplineresources(){
        /* 1) Create and upload image to GPU*/
@@ -1726,9 +1730,27 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, scr
        //printf("\n After\n");
        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_info.twodpipelineLayout, 0, 1/*descriptorSetCount*/, &(vulkan_info.twoddescriptorSets[vulkan_info.currentFrame]), 0, NULL);
 
+       push_const_t tmp = {0};
+       tmp.offst[0] = 0.1f;
+       tmp.offst[1] = 0.1f;
+       tmp.screen_offst[0] = 0.05f;
+       tmp.screen_offst[1] = 0.0f;
 
-       vkCmdDrawIndexed(commandBuffer, n_2d_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
+       float xs[11] = {0, 7, 4, 4, 7, 0, 5, 7, 0, 4, 6};
+       float ys[11] = {4, 3, 4, 4, 4, 0, 5, 4, 5, 4, 3};
 
+       for(int i = 0; i < 11; i += 1){
+
+              tmp.offst[0] = xs[i]*0.1f;
+              tmp.offst[1] = ys[i]*0.1f;
+              vkCmdPushConstants(commandBuffer, vulkan_info.twodpipelineLayout, \
+                     VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push_const_t), &tmp);
+
+              vkCmdDrawIndexed(commandBuffer, n_2d_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
+
+              tmp.screen_offst[0] += 0.05;
+
+       }
 
 
 
@@ -2118,7 +2140,16 @@ void createGraphicsPipeline() {
 
 
        // 2D PIPELINE
+       VkPushConstantRange pushConstantRange = {0};
+       pushConstantRange.offset = 0;
+       pushConstantRange.size = sizeof(push_const_t);
+       pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
        pipelineLayoutInfo.pSetLayouts = &(vulkan_info.twddescriptorSetLayout);
+       pipelineLayoutInfo.setLayoutCount = 1;
+       pipelineLayoutInfo.pushConstantRangeCount = 1;
+       pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
        check_err(vkCreatePipelineLayout(vulkan_info.device, &pipelineLayoutInfo, NULL, &(vulkan_info.twodpipelineLayout)), "failed to create pipeline layout!");
        pipelineInfo.layout = vulkan_info.twodpipelineLayout;
 
