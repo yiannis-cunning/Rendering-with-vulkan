@@ -1224,13 +1224,28 @@ void createVertexBuffer(){
 }
 
 
+typedef struct Vertex_tex_t {
+       float pos[3];
+       float color[3];
+       float texCord[2];
+} Vertex_tex_t;
+
+static VkVertexInputBindingDescription VertextTrigTex2Ddescription = {
+       0, /* index of bindin in an array of this?*/  sizeof(Vertex_tex_t) /*stride*/, VK_VERTEX_INPUT_RATE_VERTEX /*Changes with instanceing*/
+};
+static VkVertexInputAttributeDescription VertextTrigTex2DAttributes[3] = {
+       (VkVertexInputAttributeDescription){0, 0, VK_FORMAT_R32G32B32_SFLOAT /*not actually color related*/, offsetof(Vertex_tex_t, pos)},
+       (VkVertexInputAttributeDescription){1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(Vertex_tex_t, color) },
+       (VkVertexInputAttributeDescription){2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(Vertex_tex_t, texCord) }
+};
 
 
-static Vertex_t rectangle_2d[] = {
-       {{-0.9f, 0.9f, 0.0f}, {1.0f, 1.0f, 1.0f}},
-       {{-0.9f, 0.95f, 0.0f}, {1.0f, 1.0f, 1.0f}},
-       {{-0.5f, 0.95f, 0.0f}, {1.0f, 1.0f, 1.0f}},
-       {{-0.5f, 0.9f, 0.0f}, {1.0f, 1.0f, 1.0f}},
+
+static Vertex_tex_t rectangle_2d[] = {
+       {{-0.9f, 0.1f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.1f, 0.1f}},
+       {{-0.9f, 0.95f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.1f, 0.2f}},
+       {{-0.5f, 0.95f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.2f, 0.2f}},
+       {{-0.5f, 0.1f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.2f, 0.1f}},
 };
 
 const uint16_t indicies_2d[] = {
@@ -1274,7 +1289,7 @@ void create2dpiplineresources(){
        */
 
        /* 3) Input buffers */
-       createGPUBuffer( &(vulkan_info.twodvertexBuffer), &(vulkan_info.twodvertexBufferMemory), sizeof(Vertex_t)*4, rectangle_2d, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+       createGPUBuffer( &(vulkan_info.twodvertexBuffer), &(vulkan_info.twodvertexBufferMemory), sizeof(Vertex_tex_t)*4, rectangle_2d, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
        createGPUBuffer( &(vulkan_info.twodindexBuffer), &(vulkan_info.twodindexBufferMemory), sizeof(uint16_t)*6, indicies_2d, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 
 }
@@ -1286,8 +1301,8 @@ void updatetwodUniformBuffer(uint32_t currentImage, screenProperties_t screen){
        twodUBO_t ubo = {0};
 
        matrix4_t model_mat = {0};
-       model_mat.r0 = (vector4_t){0.5, 0, 0, 0};
-       model_mat.r1 = (vector4_t){0, 0.5, 0, 0};
+       model_mat.r0 = (vector4_t){1, 0, 0, 0};
+       model_mat.r1 = (vector4_t){0, 1, 0, 0};
        model_mat.r2 = (vector4_t){0, 0, 1, 0};
        model_mat.r3 = (vector4_t){0, 0, 0, 1};
 
@@ -2101,6 +2116,7 @@ void createGraphicsPipeline() {
 
 
 
+
        // 2D PIPELINE
        pipelineLayoutInfo.pSetLayouts = &(vulkan_info.twddescriptorSetLayout);
        check_err(vkCreatePipelineLayout(vulkan_info.device, &pipelineLayoutInfo, NULL, &(vulkan_info.twodpipelineLayout)), "failed to create pipeline layout!");
@@ -2122,6 +2138,10 @@ void createGraphicsPipeline() {
        // 3. Revert changes made for the line one
        //pipelineInfo.pInputAssemblyState = &inputAssembly;
        lineInputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+       lineVertexInputInfo.vertexBindingDescriptionCount = 1;
+       lineVertexInputInfo.vertexAttributeDescriptionCount = 3;
+       lineVertexInputInfo.pVertexBindingDescriptions = &VertextTrigTex2Ddescription;
+       lineVertexInputInfo.pVertexAttributeDescriptions = VertextTrigTex2DAttributes;
        //pipelineInfo.pVertexInputState = &vertexInputInfo;
 
        
