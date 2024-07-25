@@ -25,8 +25,8 @@ LINALG_C = C:\clibs\math\linalg.c
 
 LINK_OPTS_STD = -L C:\Users\yiann\Desktop\installing_mingw_64-master\mingw64\bin -lstdc++ -lopengl32
 
-glfw_wind: glfw_main.c vulkan3.c ${LINALG_C}
-	${gcc_path} $^ ${LIB_GLFW} ${INCL_GLFW} ${LIB_VULKAN} ${INCL_VULKAN} ${LINALG_INCL} ${INCL_STB} -o glfw_wind.exe
+glfw_wind: glfw_main.c vulkan3.c ./src/controlModes.c ${LINALG_C}
+	${gcc_path}  $^ ${LIB_GLFW} ${INCL_GLFW} ${LIB_VULKAN} ${INCL_VULKAN} ${LINALG_INCL} ${INCL_STB} -I src/ -o glfw_wind.exe
 
 
 

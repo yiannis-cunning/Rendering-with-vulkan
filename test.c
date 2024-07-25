@@ -7,7 +7,7 @@ int main(){
        printf("HEllo world");
 
 
-
+/*
        int n = 0;
        char buf;
        HANDLE hStdInput = GetStdHandle(STD_INPUT_HANDLE);
@@ -29,6 +29,6 @@ int main(){
                      printf("h");
               }
        }
-       return 1;
+       return 1;*/
 
 }

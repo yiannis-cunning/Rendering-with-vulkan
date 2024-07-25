@@ -1730,6 +1730,8 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, scr
        //printf("\n After\n");
        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_info.twodpipelineLayout, 0, 1/*descriptorSetCount*/, &(vulkan_info.twoddescriptorSets[vulkan_info.currentFrame]), 0, NULL);
 
+       /*
+       if(0){
        push_const_t tmp = {0};
 
        float d_screen_char = 0.05;
@@ -1748,6 +1750,31 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, scr
               vkCmdDrawIndexed(commandBuffer, n_2d_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
               i += 1;
               chr = screen.chars[i];
+       }
+       }*/
+
+       float char_to_char_dx = 0.05f;
+       float size_of_char_in_bitmap = 0.1f;
+       push_const_t tmp = {0};
+       int bitmap_index;
+
+       for(int i=0; i<screen.n_chars; i += 1){
+              if(screen.text_buffer[i] >= 'a' && screen.text_buffer[i] <= 'z'){
+                     bitmap_index = 33 + screen.text_buffer[i] - 'a';
+              } else if(screen.text_buffer[i] >= 'A' && screen.text_buffer[i] <= 'Z'){
+                     bitmap_index = 33 + screen.text_buffer[i] - 'A';
+              } else {continue;}
+
+              //printf("Bitmap index %d", bitmap_index);
+
+              tmp.screen_offst[0] = char_to_char_dx*i;
+              tmp.screen_offst[1] = 0;
+              tmp.offst[0] = (bitmap_index % 10)*size_of_char_in_bitmap;
+              tmp.offst[1] = ((int) (bitmap_index / 10))*size_of_char_in_bitmap;
+              vkCmdPushConstants(commandBuffer, vulkan_info.twodpipelineLayout, \
+                     VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push_const_t), &tmp);
+
+              vkCmdDrawIndexed(commandBuffer, n_2d_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
        }
 
 

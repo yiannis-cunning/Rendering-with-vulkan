@@ -20,7 +20,11 @@ typedef struct screenProperties_t{
 
        charcter_t *chars;
        int chars_sz;
-       int n_chars;
+       //int n_chars;
+
+       char *text_buffer;
+       uint32_t n_chars;
+       uint32_t alloc_size;
 } screenProperties_t;
 
 

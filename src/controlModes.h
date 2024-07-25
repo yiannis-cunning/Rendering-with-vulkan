@@ -1,24 +1,52 @@
+#ifndef CONTROL_MODES_H
+#define CONTROL_MODES_H
+
 #include "linalg.h"
 #include <math.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <io.h>
+#include <fcntl.h>
+#include <time.h>
+#include "../vulkan3.h"
+#include "../glfw_main.h"
 
 
-typedef enum {CONTROL_FLY_MODE, CONTROL_XYZ_MODE} control_mode_enum;
+typedef enum {CONTROL_FLY_MODE, CONTROL_XYZ_MODE, TEXT_MODE, PAUSE_MODE} control_mode_enum;
 
 
-
-struct pressing{
-       bool w, a, s, d, i, j, k, l, shift, space, r;
-       float dxmov, dymov;
-       pressing(){
-              w = 0; a = 0; s = 0; d = 0;
-              i = 0; j = 0; k = 0; l = 0;
-              shift = 0; space = 0; r = 0;
-              dxmov = 0; dymov = 0;
-       }
+struct key_press_t {
+       bool pressed;
+       uint32_t ticks_pressed;
 };
 
 
+struct pressing_t{
+       struct key_press_t atoz[26];
+       //struct key_press_t atoz_caps[26];
+       struct key_press_t exlamation, question, colon, semicolon, backspace, shift, enter, slash, backslack, space;
+
+       double xpos;
+       double ypos;
+};
+
+
+void tick_update(struct pressing_t pressing);
+
+void controller_init();
+
+screenProperties_t get_screen();
+
+void new_chr_in(unsigned int char_i);
+
+void bkspc();
+
+
+/*
 class flyMode{
        float pos[3], view[3], phi, theta, r, inc, incang, *v, *offset;
 public:
@@ -65,4 +93,7 @@ public:
        controller2(float *view_init, float *offset_init);
        bool tick_update();
        void rotate_mode();
-};
+};*/
+
+
+#endif
