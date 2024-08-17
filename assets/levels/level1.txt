@@ -1,0 +1,26 @@
+ntextures=4
+0:assets\textures\grass.bmp
+1:assets\textures\brick.bmp
+2:assets\textures\wood.bmp
+3:assets\textures\cloud.bmp
+N_objects=3
+0:{ // grass
+instances:4
+positions:{ {5, 5, 0}, {-5, 5, 0}, {-5, -5, 0}, {5, -5, 0} }
+square:0:{{0,0,1},{0,0,0},10}
+}
+1:{ // house
+instances:1
+positions:{ {0, 0, 0} }
+square:2:{0,0,1},{0,0,0},10}
+square:1:{1,0,0},{-5,0,5},10}
+square:1:{1,0,0},{5,0,5},10}
+square:1:{0,1,0},{0,5,5},10}
+square:1:{0,1,0},{0,-5,5},10}
+pyramid:2:{0,0,1},{0,0,10},10,5}
+}
+2:{ // cloud
+instances:2
+positions:{ {7.5, 7.5, 25}, {-7.5, -7.5, 25} }
+cube:0:{0,0,0},{0,0,1},4
+}

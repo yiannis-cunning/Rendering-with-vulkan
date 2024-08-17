@@ -28,7 +28,7 @@ struct key_press_t {
 struct pressing_t{
        struct key_press_t atoz[26];
        //struct key_press_t atoz_caps[26];
-       struct key_press_t exlamation, question, colon, semicolon, backspace, shift, enter, slash, backslack, space;
+       struct key_press_t exlamation, question, colon, semicolon, backspace, shift, enter, slash, backslack, space, escape, delete_key;
 
        double xpos;
        double ypos;
@@ -44,6 +44,10 @@ screenProperties_t get_screen();
 void new_chr_in(unsigned int char_i);
 
 void bkspc();
+
+void execute_cmd();
+
+void delall();
 
 
 /*

@@ -22,9 +22,19 @@ typedef struct state_data_t{
        float r;
        float phi;
 
+       // Mouse data
        double xpos_prev;
        double ypos_prev;
        bool good;
+
+
+       // Movment parameters
+       float xspd;
+       float yspd;
+       float zspd;
+
+       float sensitivity;
+
 
 
 } state_data_t;
@@ -48,8 +58,15 @@ void add_chr_screen(char *str, int n_chars);
 
 
 void bkspc(){
-       if(screen.n_chars != 0){
+       if(screen.n_chars != 0 && cur_state == PAUSE_MODE){
               screen.n_chars -= 1;
+              screen.text_buffer[screen.n_chars] = 0;
+       }
+}
+void delall(){
+       if(screen.n_chars != 0){
+              screen.n_chars = 0;
+              screen.text_buffer[0] = 0;
        }
 }
 
@@ -71,7 +88,7 @@ screenProperties_t get_screen(){
 
 
 void tick_update(struct pressing_t pressing){
-       if(pressing.atoz['p' - 'a'].pressed && !pressing_local.atoz['p' - 'a'].pressed){
+       if(pressing.escape.pressed && !pressing_local.escape.pressed){
               state_data.good = 0;
               if(cur_state == CONTROL_FLY_MODE){
                      cur_state = PAUSE_MODE;
@@ -81,7 +98,7 @@ void tick_update(struct pressing_t pressing){
                      mouselockon();
               }
        }
-       pressing_local.atoz['p' - 'a'].pressed = pressing.atoz['p' - 'a'].pressed;
+       pressing_local.escape.pressed = pressing.escape.pressed;
 
        switch(cur_state){
               case CONTROL_FLY_MODE:
@@ -105,7 +122,6 @@ static void tickupdate_fly_mode(struct pressing_t pressing){
        float xaxis[3] = {1, 0, 0};
        float yaxis[3] = {0, 1, 0};
 
-       float inc = 0.1;
 
        int s = pressing.atoz['s' - 'a'].pressed;
        int w = pressing.atoz['w' - 'a'].pressed;
@@ -118,19 +134,19 @@ static void tickupdate_fly_mode(struct pressing_t pressing){
        if(s || w ){
               cpyVec(screen.view, temp);
               normalize(temp);
-              constMult((inc)*(w-s), temp, temp);
+              constMult((state_data.xspd)*(w-s), temp, temp);
               addVec(temp, screen.offset, screen.offset);
        }
        if(d || a){
               cross(zaxis, screen.view, temp);
               normalize(temp);
-              constMult((inc)*(a-d), temp, temp);
+              constMult((state_data.yspd)*(a-d), temp, temp);
               addVec(temp, screen.offset, screen.offset);
        }
        if(space || shift){
               cpyVec(zaxis, temp);
               normalize(temp);
-              constMult((inc)*(space-shift), temp, temp);
+              constMult((state_data.zspd)*(space-shift), temp, temp);
               addVec(temp, screen.offset, screen.offset);
        }
 
@@ -138,8 +154,8 @@ static void tickupdate_fly_mode(struct pressing_t pressing){
        //printf("dxmov %f, dymov %f", pressing.xpos, pressing.ypos);
        if(state_data.good){
               view_to_rthetaphi();
-              state_data.theta += -1*(pressing.xpos - state_data.xpos_prev)*0.001;
-              state_data.phi += (pressing.ypos - state_data.ypos_prev)*0.001;
+              state_data.theta += -1*(pressing.xpos - state_data.xpos_prev)*state_data.sensitivity;
+              state_data.phi += (pressing.ypos - state_data.ypos_prev)*state_data.sensitivity;
 
               if(state_data.theta < 0){state_data.theta += 2*PI_LOCAL;}
               if(state_data.theta > 2*PI_LOCAL){state_data.theta -= 2*PI_LOCAL;}
@@ -156,15 +172,7 @@ static void tickupdate_fly_mode(struct pressing_t pressing){
 
        
        //printf("\nON: %d, ticks: %d", pressing.atoz['j' - 'a'].pressed, pressing.atoz['j' - 'a'].ticks_pressed);   
-       if(pressing.atoz['j' - 'a'].pressed && !pressing_local.atoz['j' - 'a'].pressed) {
-              screen.fov += 0.1;
-       }
-       pressing_local.atoz['j' - 'a'].pressed = pressing.atoz['j' - 'a'].pressed;
-
-       if(pressing.atoz['k' - 'a'].pressed && !pressing_local.atoz['k' - 'a'].pressed) {
-              screen.fov -= 0.1;
-       }
-       pressing_local.atoz['k' - 'a'].pressed = pressing.atoz['k' - 'a'].pressed;
+       //pressing_local.atoz['k' - 'a'].pressed = pressing.atoz['k' - 'a'].pressed;
 
        
 
@@ -216,7 +224,7 @@ void controller_init(){
        rthetaphi_to_view();
 
 
-       screen.fov = 45;
+       screen.fov = 90;
        screen.clipDist = 1;
        screen.renderDist = 100;
 
@@ -224,6 +232,11 @@ void controller_init(){
        // Text buffer
        screen.alloc_size = 256;
        screen.text_buffer = (char *)calloc(sizeof(char), 256);
+
+       state_data.xspd = 0.1;
+       state_data.yspd = 0.1;
+       state_data.zspd = 0.1;
+       state_data.sensitivity = 0.001;
 }
 
 
@@ -261,10 +274,133 @@ void add_chr_screen(char *str, int n_chars){
 }
 
 void new_chr_in(unsigned int char_i){
-       if(screen.alloc_size > screen.n_chars && cur_state == PAUSE_MODE ){
+       if(screen.alloc_size > screen.n_chars + 1 && cur_state == PAUSE_MODE ){
               screen.text_buffer[screen.n_chars] = (char)char_i;
               screen.n_chars += 1;
        }
+       screen.text_buffer[screen.n_chars] = 0;
+}
+
+void set_msg(char *msg){
+       int i = 0;
+       while(msg[i] != 0){
+              new_chr_in(msg[i]);
+              i += 1;
+       }
+}
+
+void execute_cmd(){
+       /*process the command found in screen.text_buffer*/
+       char *text_buffer = screen.text_buffer;
+
+       if(screen.n_chars < 1 || cur_state != PAUSE_MODE){
+              return;
+       }
+       else if(screen.text_buffer[0] != '/'){
+              return;
+       }
+       // - /exit
+       else if(strcmp(text_buffer + 1, "exit" ) == 0){
+              exit(1);
+       }
+       // - /set <parameter> <value>\0
+       else if(strncmp(text_buffer + 1, "set ", 4) == 0){
+              text_buffer = text_buffer + 5;
+              float atoi_val = 0;
+
+              if(strncmp(text_buffer, "xspd ", 5) == 0)
+              {
+                     text_buffer = text_buffer + 5;
+                     atoi_val = atof(text_buffer);
+                     if(atoi_val != -1){
+                            state_data.xspd = atoi_val;
+                            screen.n_chars = 0;
+                            set_msg("Set xspd OKAY.");
+                            return;
+                     }
+
+              }
+              else if(strncmp(text_buffer, "yspd ", 5) == 0)
+              {
+                     text_buffer = text_buffer + 5;
+                     atoi_val = atof(text_buffer);
+                     if(atoi_val != -1){
+                            state_data.yspd = atoi_val;
+                            screen.n_chars = 0;
+                            set_msg("Set yspd OKAY.");
+                            return;
+                     }
+              }
+              else if(strncmp(text_buffer, "zspd ", 5) == 0)
+              {
+                     text_buffer = text_buffer + 5;
+                     atoi_val = atof(text_buffer);
+                     if(atoi_val != -1){
+                            state_data.zspd = atoi_val;
+                            screen.n_chars = 0;
+                            set_msg("Set zspd OKAY.");
+                            return;
+                     }
+              }
+              else if(strncmp(text_buffer, "sensitivity ", 12) == 0)
+              {
+                     text_buffer = text_buffer + 12;
+                     atoi_val = atof(text_buffer);
+                     if(atoi_val != -1){
+                            state_data.sensitivity = atoi_val;
+                            screen.n_chars = 0;
+                            set_msg("Set sensitivity OKAY.");
+                            return;
+                     }
+              }
+              else if(strncmp(text_buffer, "pos ", 4) == 0)
+              {
+
+                     text_buffer = text_buffer + 4;
+                     float xval = atof(text_buffer);
+                     while(*text_buffer != ' ' && *text_buffer != '\0'){text_buffer += 1;}
+                     if(*text_buffer != '\0'){
+                            float yval = atof(text_buffer);
+                            while(*text_buffer != ' ' && *text_buffer != '\0'){text_buffer += 1;}
+                            if(*text_buffer != '\0'){
+                                   float zval = atof(text_buffer);
+                                   setvector_t(screen.offset, xval, yval, zval);
+                                   screen.n_chars = 0;
+                                   set_msg("Set pos OKAY.");
+                                   printf("Setting position to %f, %f, %f\n", xval, yval, zval);
+                                   return;
+                            }
+                     }
+              }
+
+              screen.n_chars = 0;
+              set_msg("Set command failed!");
+              return;
+       }
+       else if(strcmp(text_buffer + 1, "center" ) == 0){
+              if(screen.offset[0] == 0 && screen.offset[1] == 0 && screen.offset[2] == 0){
+                     return;
+              }
+              constMult(-1.0f, screen.offset, screen.view);
+              normalize(screen.view);
+              screen.n_chars = 0;
+              set_msg("centered OKAY.");
+              return;
+       } else if(strncmp(text_buffer + 1, "load ", 5) == 0){
+              
+              //printf("Loading level \"%s\"...", text_buffer + 6);    
+              //load_level(text_buffer + 1 + 5);
+              load_level("assets/levels/level1.txt");
+              printf("Done loading level\n");
+              screen.n_chars = 0;
+              set_msg("Loading level...");     
+              return;
+       }
+       
+       screen.n_chars = 0;
+       set_msg("Invalid commmand!");
+       return;
+
 }
 
 

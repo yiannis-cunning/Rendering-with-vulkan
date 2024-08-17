@@ -89,8 +89,49 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
               } else if(action == GLFW_REPEAT){
                      pressing.backspace.pressed = 1;
                      pressing.backspace.ticks_pressed += 1;
+                     if(pressing.backspace.ticks_pressed %3 == 1){
+                            bkspc();
+                     }
               } else if(action == GLFW_RELEASE){
                      pressing.backspace.pressed = 0;         
+              }
+       }
+
+
+       if(key == GLFW_KEY_ENTER){
+              if(action ==  GLFW_PRESS){
+                     execute_cmd();
+                     pressing.enter.pressed = 1;
+                     pressing.enter.ticks_pressed = 0;
+              } else if(action == GLFW_REPEAT){
+                     pressing.enter.pressed = 1;
+                     pressing.enter.ticks_pressed += 1;
+              } else if(action == GLFW_RELEASE){
+                     pressing.enter.pressed = 0;         
+              }
+       }
+
+       if(key == GLFW_KEY_ESCAPE){
+              if(action ==  GLFW_PRESS){
+                     pressing.escape.pressed = 1;
+                     pressing.escape.ticks_pressed = 0;
+              } else if(action == GLFW_REPEAT){
+                     pressing.escape.pressed = 1;
+                     pressing.escape.ticks_pressed += 1;
+              } else if(action == GLFW_RELEASE){
+                     pressing.escape.pressed = 0;         
+              }
+       }
+       if(key == GLFW_KEY_DELETE){
+              delall();
+              if(action ==  GLFW_PRESS){
+                     pressing.delete_key.pressed = 1;
+                     pressing.delete_key.ticks_pressed = 0;
+              } else if(action == GLFW_REPEAT){
+                     pressing.delete_key.pressed = 1;
+                     pressing.delete_key.ticks_pressed += 1;
+              } else if(action == GLFW_RELEASE){
+                     pressing.delete_key.pressed = 0;         
               }
        }
 
@@ -124,8 +165,6 @@ int main(int argc, char *argv[]){
 
        //add_chr_screen("Hello World", 11);
 
-
-
        if (!glfwInit()){
               exit(EXIT_FAILURE);
               printf("failed to init glfw");
@@ -141,6 +180,11 @@ int main(int argc, char *argv[]){
 
        vulkan_run();
        controller_init();
+
+       //printf("Loading level\n");
+       //load_level("assets\\levels\\level1.txt");
+       //exit(1);
+
        
        printf("Finished starting vulkan... Entering main loop\n");
        while (!glfwWindowShouldClose(window)){

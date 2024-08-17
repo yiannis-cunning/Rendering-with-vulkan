@@ -1,0 +1,60 @@
+In-Game key maps
+       escape: enter text mode
+       enter: execute command in text buffer
+       delete: delte text buffer
+       w/a/s/d: fly around
+       space/shift: up/down
+
+
+In-game command line commands:
+       1) set <parameter> <value> - sets the value of some in game constant
+              <parameter> in xspd/yspd/zspd/pos
+              <value> 1x float for most, 3x floats for pos
+       2) exit
+              exits the program
+       3) center
+              center the camera on the origin
+
+
+
+Format of .level files
+
+1. list of every texture asset linked (most formats accepted - bmp/jpeg/png)
+2. Number of objects
+
+
+// house on grass with clouds, centered around x: -10 -> 10, y: -10 -> 10, x: 0 -> 10
+<SOF>
+N_textures=4
+0: grass.bmp
+1: brick.bmp
+2: wood.bmp
+3: cloud.bmp
+
+N_objects=3
+
+0:{ // grass
+instances:4
+positions:{ {5, 5, 0}, {-5, 5, 0}, {-5, -5, 0}, {5, -5, 0} }
+square:0:{{0,0,1},{0,0,0},10}
+}
+1:{ // house
+instances:1
+positions:{ {0, 0, 0} }
+square:2:{0,0,1},{0,0,0},10}
+square:1:{1,0,0},{-5,0,5},10}
+square:1:{1,0,0},{5,0,5},10}
+square:1:{0,1,0},{0,5,5},10}
+square:1:{0,1,0},{0,-5,5},10}
+pyramid:2:{0,0,1},{0,0,10},10,5}
+}
+2:{ // cloud
+instances:2
+positions:{ {7.5, 7.5, 25}, {-7.5, -7.5, 25} }
+cube:0:{0,0,0},{0,0,1},4
+}
+
+
+1) create textures images
+2) create a descriptor set for each texture, object combo
+3) 

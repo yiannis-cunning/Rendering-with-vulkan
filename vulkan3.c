@@ -105,7 +105,7 @@ void createDescriptorSetLayout();
 
 void createUniformBuffers();
 
-void createDescriptorPool();
+void createDescriptorPool(VkDescriptorPool *descriptorPool_p, int n_uniformBuffers, int n_imageSamplers);
 
 void createDescriptorSets();
 
@@ -116,7 +116,7 @@ VkCommandBuffer beginSingleTimeCommands();
 void endSingleTimeCommands(VkCommandBuffer commandBuffer);
 
 /* Create texture vkImage from a image file*/
-void createTextureImage(char *filename);
+void createTextureImage(char *filename, VkImage *textureImage_p, VkDeviceMemory *textureImageMemory_p, VkImageView *textureImageView_p);
 
 void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
 
@@ -143,6 +143,8 @@ void init_particles();
 
 void create2dpiplineresources();
 
+void create3dpipelineresources();
+
 void updatetwodUniformBuffer(uint32_t currentImage, screenProperties_t screen);
 
 void createGenericUniformBuffers(VkDeviceSize sizeofubo, int n_ubos, VkBuffer **uniformBuffer_out, VkDeviceMemory **unifromMemory_out, void ***uniformMap_out);
@@ -151,10 +153,34 @@ void createGPUBuffer();
 
 void *safe_calloc(uint32_t size, uint32_t amt);
 
-void createtwodDescriptorSetLayout();
+void createtwodDescriptorSetLayout(VkDescriptorSetLayout *descriptorSetLayout_p);
 
 void createtwodDescriptorSets();
 
+void createTexturedDescriptorSets(int n_frames, VkDescriptorSetLayout layout, VkDescriptorPool descriptorPool, VkDescriptorSet **descriptorSetsArr_p, \
+VkBuffer *uniformBufferArr, int ubo_size, VkImageView textureImageView, VkSampler textureSampler);
+
+
+
+typedef struct dynamic_data_t{
+
+       // Descriptor pool
+       VkDescriptorPool     descriptorPool;
+
+       // 1) Textures
+       VkImage              *textureImages;
+       VkDeviceMemory       *textureImageMemorys;
+       VkImageView          *textureImageViews;
+       int                  n_textures;
+
+
+       // 2) Uniform buffers
+       VkBuffer                    *uniformBuffers;
+       VkDeviceMemory              *uniformBuffersMemory;
+       void                        **uniformBuffersMapped;
+       int                         n_objects;
+       
+} dynamic_data_t;
 
 
 // 3) local/private variables
@@ -280,13 +306,18 @@ typedef struct vulkan_instance_t{
        VkDeviceMemory              *twoduniformBuffersMemory;
        void                        **twoduniformBuffersMapped;
 
+       /* 3D pipeline suff */
+       VkDescriptorSetLayout       threeddescriptorSetLayout;
+
        bool framebufferResized;
+
 
 
 } vulkan_instance_t;
 
 static vulkan_instance_t vulkan_info = {0};
 
+static dynamic_data_t dynamic_data = {0};
 
 
 
@@ -340,7 +371,7 @@ void vulkan_run(){
        printf("\n7) Creating renderpass\n"); 
        createRenderPass();
        printf("\n8) Creating a pool for descriptors\n");
-       createDescriptorPool();
+       createDescriptorPool(&(vulkan_info.descriptorPool), MAX_FRAMES_IN_FLIGHT*3, MAX_FRAMES_IN_FLIGHT*1);
        printf("\n9) Creating a command pool\n");
        createCommandPool();
        
@@ -940,14 +971,14 @@ void updateUniformBuffer(uint32_t currentImage, screenProperties_t screen){
 }
 
 
-void createDescriptorPool(){
+void createDescriptorPool(VkDescriptorPool *descriptorPool_p, int n_uniformBuffers, int n_imageSamplers){
        // 1. Make size structure
        VkDescriptorPoolSize poolSizes[2] = {0};
        poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-       poolSizes[0].descriptorCount = MAX_FRAMES_IN_FLIGHT*3;      // 3 for each frame, both compute and graphics, and graphics 2d
+       poolSizes[0].descriptorCount = n_uniformBuffers;      // 3 for each frame, both compute and graphics, and graphics 2d
        
        poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-       poolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT*1;         // only graphics 2d using this
+       poolSizes[1].descriptorCount = n_imageSamplers;         // only graphics 2d using this
 
 
        // 2. Make pool create structure
@@ -958,7 +989,7 @@ void createDescriptorPool(){
        poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT*3;
 
        /* use VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT if you want to be able to free descriptor sets*/
-       check_err(vkCreateDescriptorPool(vulkan_info.device, &poolInfo, NULL, &(vulkan_info.descriptorPool)), "failed to create descriptor pool!");
+       check_err(vkCreateDescriptorPool(vulkan_info.device, &poolInfo, NULL, descriptorPool_p), "failed to create descriptor pool!");
 }
 
 /* Allocate a 'set' in the pool with the layout specified. Also fix reference to vkbuffer. */
@@ -1224,6 +1255,15 @@ void createVertexBuffer(){
 }
 
 
+
+
+
+
+
+
+
+
+
 typedef struct Vertex_tex_t {
        float pos[3];
        float color[3];
@@ -1266,7 +1306,7 @@ typedef struct push_const_t {
 
 void create2dpiplineresources(){
        /* 1) Create and upload image to GPU*/
-       createTextureImage("textures\\lucidagrande.bmp");
+       createTextureImage("assets\\textures\\lucidagrande.bmp", &(vulkan_info.textureImage), &(vulkan_info.textureImageMemory), &(vulkan_info.textureImageView));
 
        /* 2) Create texture sampler*/
        createTextureSampler();
@@ -1279,10 +1319,12 @@ void create2dpiplineresources(){
                             &(vulkan_info.twoduniformBuffersMapped));
 
        printf("   b) Creating 2D Unifrom layout \n");
-       createtwodDescriptorSetLayout(); /* New descriptor type being used */
+       createtwodDescriptorSetLayout(&(vulkan_info.twddescriptorSetLayout)); /* New descriptor type being used */
 
        printf("   c) Allocating descriptor sets \n");
-       createtwodDescriptorSets();
+       //createtwodDescriptorSets();
+       createTexturedDescriptorSets(MAX_FRAMES_IN_FLIGHT, vulkan_info.twddescriptorSetLayout, vulkan_info.descriptorPool, &(vulkan_info.twoddescriptorSets), \
+vulkan_info.twoduniformBuffers, sizeof(twodUBO_t), vulkan_info.textureImageView, vulkan_info.textureSampler);
 
        printf("   d) Creating input buffers \n");
        /* 3) Make descriptor sets
@@ -1297,6 +1339,13 @@ void create2dpiplineresources(){
        createGPUBuffer( &(vulkan_info.twodindexBuffer), &(vulkan_info.twodindexBufferMemory), sizeof(uint16_t)*6, indicies_2d, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 
 }
+
+// Assets will be added when a level is loaded.
+void create3dpipelineresources(){
+       createtwodDescriptorSetLayout(&(vulkan_info.threeddescriptorSetLayout));
+
+}
+
 
 
 
@@ -1341,7 +1390,7 @@ void createGenericUniformBuffers(VkDeviceSize sizeofubo, int n_ubos, VkBuffer **
        }
 }
 
-void createtwodDescriptorSetLayout() {
+void createtwodDescriptorSetLayout(VkDescriptorSetLayout *descriptorSetLayout_p) {
        VkDescriptorSetLayoutBinding uboLayoutBinding = {0};
        uboLayoutBinding.binding = 0;
        uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -1363,7 +1412,7 @@ void createtwodDescriptorSetLayout() {
        layoutInfo.bindingCount = 2;
        layoutInfo.pBindings = bindings;
 
-       check_err(vkCreateDescriptorSetLayout(vulkan_info.device, &layoutInfo, NULL, &(vulkan_info.twddescriptorSetLayout)), "failed to create 2D descriptor set layout!");
+       check_err(vkCreateDescriptorSetLayout(vulkan_info.device, &layoutInfo, NULL, descriptorSetLayout_p), "failed to create 2D descriptor set layout!");
 
 }
 
@@ -1428,6 +1477,70 @@ void createtwodDescriptorSets(){
        }
 
 }
+
+void createTexturedDescriptorSets(int n_frames, VkDescriptorSetLayout layout, VkDescriptorPool descriptorPool, VkDescriptorSet **descriptorSetsArr_p, \
+VkBuffer *uniformBufferArr, int ubo_size, VkImageView textureImageView, VkSampler textureSampler){
+
+       // 1. Specify the layout of the descriptor sets you are making
+       VkDescriptorSetLayout *layouts = (VkDescriptorSetLayout *)calloc(sizeof(VkDescriptorSetLayout), n_frames);
+       for(int i =0; i < n_frames; i += 1){
+              layouts[i] = layout;
+       }
+
+       // 2. Allocate the descriptor sets
+       VkDescriptorSetAllocateInfo allocInfo = {0};
+       allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+       allocInfo.descriptorPool = descriptorPool;
+       allocInfo.descriptorSetCount = n_frames;
+       allocInfo.pSetLayouts = layouts;
+
+       if(*descriptorSetsArr_p != NULL){free(*descriptorSetsArr_p); }
+       *descriptorSetsArr_p = (VkDescriptorSet *)calloc(sizeof(VkDescriptorSet), n_frames);
+
+       check_err(vkAllocateDescriptorSets(vulkan_info.device, &allocInfo, *descriptorSetsArr_p), "failed to allocate descriptor sets!");
+
+       /* Will need to fill up the descriptor sets -> these are 'sets' allocated in the 'pool' are refering to specific vkbuffers (made before)*/
+       for (size_t i = 0; i < n_frames; i++) {
+              // 3. Fix up refrences to the buffers
+              VkDescriptorBufferInfo bufferInfo = {0};
+              bufferInfo.buffer = uniformBufferArr[i];
+              bufferInfo.offset = 0;
+              bufferInfo.range = ubo_size;
+
+              VkDescriptorImageInfo imageInfo = {0};
+              imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+              imageInfo.imageView = textureImageView;
+              imageInfo.sampler = textureSampler;
+
+              // 4. update the sets
+              VkWriteDescriptorSet descriptorWrite0 = {0};
+              descriptorWrite0.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+              descriptorWrite0.dstSet = (*descriptorSetsArr_p)[i];
+              descriptorWrite0.dstBinding = 0;
+              descriptorWrite0.dstArrayElement = 0;
+              descriptorWrite0.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; // We are making a uniform buffer descritpr
+              descriptorWrite0.descriptorCount = 1;
+              descriptorWrite0.pBufferInfo = &bufferInfo;
+              descriptorWrite0.pImageInfo = NULL; // Optional
+              descriptorWrite0.pTexelBufferView = NULL; // Optional
+
+              VkWriteDescriptorSet descriptorWrite1 = {0};
+              descriptorWrite1.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+              descriptorWrite1.dstSet = (*descriptorSetsArr_p)[i];
+              descriptorWrite1.dstBinding = 1;
+              descriptorWrite1.dstArrayElement = 0;
+              descriptorWrite1.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER; // We are making a uniform buffer descritpr
+              descriptorWrite1.descriptorCount = 1;
+              descriptorWrite1.pBufferInfo = NULL;
+              descriptorWrite1.pImageInfo = &imageInfo;
+              descriptorWrite1.pTexelBufferView = NULL; // Optional
+
+              VkWriteDescriptorSet descriptorWrite[2] = {descriptorWrite0, descriptorWrite1};
+
+              vkUpdateDescriptorSets(vulkan_info.device, 2, descriptorWrite, 0, NULL);
+       }
+}
+
 
 
 
@@ -1730,40 +1843,25 @@ void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex, scr
        //printf("\n After\n");
        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_info.twodpipelineLayout, 0, 1/*descriptorSetCount*/, &(vulkan_info.twoddescriptorSets[vulkan_info.currentFrame]), 0, NULL);
 
-       /*
-       if(0){
-       push_const_t tmp = {0};
 
-       float d_screen_char = 0.05;
-       int i = 0;
-       charcter_t chr = {0};
-       chr = screen.chars[i];
-       while(chr.index < 100){
-              //printf("Character index: %d\n", chr.index);
-              tmp.screen_offst[0] = d_screen_char*chr.pos[0];
-              tmp.screen_offst[1] = d_screen_char*chr.pos[1];
-              tmp.offst[0] = (chr.index % 10)*0.1f;
-              tmp.offst[1] = ((int) (chr.index / 10))*0.1f;
-              vkCmdPushConstants(commandBuffer, vulkan_info.twodpipelineLayout, \
-                     VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push_const_t), &tmp);
-
-              vkCmdDrawIndexed(commandBuffer, n_2d_indicies, 1, 0, 0, 0); // Similar to draw but activates the shader for each index now!
-              i += 1;
-              chr = screen.chars[i];
-       }
-       }*/
 
        float char_to_char_dx = 0.05f;
        float size_of_char_in_bitmap = 0.1f;
        push_const_t tmp = {0};
        int bitmap_index;
 
+       /*
+              pos0 of bitmap is ' ' = 32
+              pos1 of bitmap is ! = 33
+              pos94 of bitmap is ~ = 126
+       */
+      int ypos = 0; // can process \n ... 
        for(int i=0; i<screen.n_chars; i += 1){
               if(screen.text_buffer[i] >= 'a' && screen.text_buffer[i] <= 'z'){
-                     bitmap_index = 33 + screen.text_buffer[i] - 'a';
-              } else if(screen.text_buffer[i] >= 'A' && screen.text_buffer[i] <= 'Z'){
-                     bitmap_index = 33 + screen.text_buffer[i] - 'A';
-              } else {continue;}
+                     bitmap_index = screen.text_buffer[i] - 'a' + 'A' - ' '; // ALL CAPS
+              } else if(screen.text_buffer[i] >= ' ' && screen.text_buffer[i] <= '~'){
+                     bitmap_index = screen.text_buffer[i] - ' ';
+              }else{bitmap_index = 10;}
 
               //printf("Bitmap index %d", bitmap_index);
 
@@ -1977,13 +2075,13 @@ void createCommandPool() {
 
 
 
-uint8_t *load_shader(const char *filename, uint32_t *sz_out){
+uint8_t *load_file(const char *filename, uint32_t *sz_out, int flags){
        int fd;
        int sz;
        int n;
 
 
-       fd = _open(filename, _O_BINARY | _O_RDONLY);
+       fd = _open(filename, flags | _O_RDONLY);
        passert(fd != -1, "Opening file for read.");
 
        sz = _lseek(fd, 0, SEEK_END);
@@ -2006,7 +2104,7 @@ uint8_t *load_shader(const char *filename, uint32_t *sz_out){
 
 VkShaderModule make_shader_module(const char *filename){
        uint32_t sz_shader = 0;
-       uint32_t *bytecode = (uint32_t *)load_shader(filename, &sz_shader);
+       uint32_t *bytecode = (uint32_t *)load_file(filename, &sz_shader, _O_BINARY);
        VkShaderModule ans;
 
 
@@ -2891,7 +2989,7 @@ void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayo
 }
 
 
-void createTextureImage(char *filename){
+void createTextureImage(char *filename, VkImage *textureImage_p, VkDeviceMemory *textureImageMemory_p, VkImageView *textureImageView_p){
        
        int texWidth, texHeight, texChannels;
        stbi_uc* pixels = stbi_load(filename, &texWidth, &texHeight, &texChannels, STBI_rgb_alpha); // raw pixel array 
@@ -2919,16 +3017,16 @@ void createTextureImage(char *filename){
 
        createImage(texWidth, texHeight, 1, VK_SAMPLE_COUNT_1_BIT, VK_FORMAT_R8G8B8A8_SRGB, \
               VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, \
-              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &(vulkan_info.textureImage), &(vulkan_info.textureImageMemory));
+              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage_p, textureImageMemory_p);
 
-       transitionImageLayout(vulkan_info.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-       copyBufferToImage(stagingBuffer, vulkan_info.textureImage, (uint32_t)(texWidth), (uint32_t)(texHeight));
-       transitionImageLayout(vulkan_info.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+       transitionImageLayout(*textureImage_p, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+       copyBufferToImage(stagingBuffer, *textureImage_p, (uint32_t)(texWidth), (uint32_t)(texHeight));
+       transitionImageLayout(*textureImage_p, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
        vkDestroyBuffer(vulkan_info.device, stagingBuffer, NULL);
        vkFreeMemory(vulkan_info.device, stagingBufferMemory, NULL);
 
-       vulkan_info.textureImageView = createImageView(vulkan_info.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+       *textureImageView_p = createImageView(*textureImage_p, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, 1);
        
 }
 
@@ -2962,8 +3060,105 @@ void createTextureSampler(){
        passert(vkCreateSampler(vulkan_info.device, &samplerInfo, NULL, &(vulkan_info.textureSampler)) == VK_SUCCESS, "failed to create texture sampler!");
 }
 
+// Matching buffer to pattern. newline ends the comarrison
+int line_format(char *buffer, char *pattern, float *floats, int *ints){
+       int ibuf = 0;
+       int ipat = 0;
+       int iints = 0;
+       while(buffer[ibuf] != '\r' && pattern[ipat] != '\0'){
+              //printf("Comparing: %c vs %c", buffer[ibuf], pattern[ipat]);
+              if(pattern[ipat] == '.'){
+                     ints[iints] = atoi(buffer + ibuf);
+                     if(ints[iints] == -1){
+                            return -1;
+                     }
+                     iints += 1;
+                     while(buffer[ibuf] >= '0' && buffer[ibuf] <= '9'){
+                            //printf("bf: %c", buffer[ibuf]);
+                            ibuf += 1;
+                     }
+                     ipat += 1;
+              } else{
+                     if(buffer[ibuf] != pattern[ipat]){
+                            //printf("%d != %d\n", buffer[ibuf], pattern[ipat]);
+                            return -1;
+                     }
+                     ipat += 1;
+                     ibuf += 1;
+              }
+       }
+       if(pattern[ipat] != '\n'){
+              return -1;
+       }
+       return ibuf + 2;
+}
 
 
+
+void load_level(char *filename){
+       //f = open(filename, O_RDONLY);
+       uint32_t sz_file;
+       char *fbuffer = (char *)load_file(filename, &sz_file, _O_BINARY);
+       char *alloc = fbuffer;
+
+
+       // 1. Save textures
+       printf("Checking first line format\n");
+       int ints[3];
+       float floats[9];
+       int ret = line_format(fbuffer, "ntextures=.\n", floats, ints);
+       
+       if(ret == -1){
+              printf("Invalid level file format\n");
+       }
+       fbuffer = fbuffer + ret; // start of next line
+       
+       printf("Found %d textures\n", ints[0]);
+
+       passert(dynamic_data.n_textures == 0, "Past textures not cleaned correctly");
+       dynamic_data.n_textures = ints[0];
+       dynamic_data.textureImages = (VkImage *)calloc(ints[0], sizeof(VkImage));
+       dynamic_data.textureImageMemorys = (VkDeviceMemory *)calloc(ints[0], sizeof(VkDeviceMemory));
+       dynamic_data.textureImageViews = (VkImageView *)calloc(ints[0], sizeof(VkImageView));
+
+       int j;
+       for(int i = 0; i < ints[0]; i += 1 ){
+              while(*fbuffer != ':'){fbuffer += 1;}
+              fbuffer += 1;
+              j = 0;
+              while(fbuffer[j] != '\r'){j += 1;}
+              fbuffer[j] = 0;
+
+              printf("Loading texture image: %s\n", fbuffer);
+              createTextureImage(fbuffer, dynamic_data.textureImages + i, \
+                                          dynamic_data.textureImageMemorys + i, \
+                                          dynamic_data.textureImageViews + i);
+              fbuffer += j + 2;
+
+       }
+       printf("Done loading textures\n");
+
+       ret = line_format(fbuffer, "N_objects=.\n", floats, ints);
+       if(ret == -1){
+              printf("Cant read number of objects\n");
+              return;
+       }
+       //dynamic_data.
+
+       // 2. Create the new descriptor sets with this - 1 per texture
+
+       // createDescriptorPool(&(dynamic_data.descriptorPool), MAX_FRAMES_IN_FLIGHT*dynamic_data.n_textures, MAX_FRAMES_IN_FLIGHT*dynamic_data.n_textures);
+       
+       // createtwodDescriptorSets(); Need 1 set per texture + pool
+       // createTexturedDescriptorSets(MAX_FRAMES_IN_FLIGHT, VkDescriptorSetLayout layout vulkan_info.threeddescriptorSetLayout, VkDescriptorPool descriptorPool, VkDescriptorSet **descriptorSetsArr_p, \
+VkBuffer *uniformBufferArr, int ubo_size, VkImageView textureImageView, VkSampler textureSampler);
+
+
+       // 3.
+
+
+       free(alloc);
+}
 
 /*
        vulkan instance:

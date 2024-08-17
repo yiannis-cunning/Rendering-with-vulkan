@@ -44,6 +44,8 @@ void vulkan_drawFrame(screenProperties_t screen);
 
 void vulkan_resized();
 
+void load_level(char *filename);
+
 typedef struct Vertex_t{
        float pos[3];
        float color[3];
