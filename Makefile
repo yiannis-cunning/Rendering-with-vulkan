@@ -5,6 +5,9 @@ glslc_path = C:\VulkanSDK\1.3.268.0\Bin\glslc.exe
 LIB_GLFW = -L C:\clibs\GLFW\lib-mingw-w64 -lglfw3 -lgdi32
 INCL_GLFW = -I C:\clibs\GLFW\include
 
+JSON_C = C:\Users\yiann\Desktop\cuda_rendering\mu_json\src\mu_json.c C:\Users\yiann\Desktop\cuda_rendering\mu_json\src\mu_str.c
+INCL_JSON = -I C:\Users\yiann\Desktop\cuda_rendering\mu_json\src
+
 INCL_STB = -I src\
 
 LIB_VULKAN =  -L C:\VulkanSDK\1.3.268.0\Lib -lvulkan-1
@@ -25,8 +28,10 @@ LINALG_C = C:\clibs\math\linalg.c
 
 LINK_OPTS_STD = -L C:\Users\yiann\Desktop\installing_mingw_64-master\mingw64\bin -lstdc++ -lopengl32
 
-glfw_wind: glfw_main.c vulkan3.c ./src/controlModes.c ${LINALG_C}
-	${gcc_path}  $^ ${LIB_GLFW} ${INCL_GLFW} ${LIB_VULKAN} ${INCL_VULKAN} ${LINALG_INCL} ${INCL_STB} -I src/ -o glfw_wind.exe
+
+
+glfw_wind: glfw_main.c vulkan3.c ./src/controlModes.c ${LINALG_C} ./src/level_ctrl.c ${JSON_C}
+	${gcc_path}  $^ ${LIB_GLFW} ${INCL_GLFW} ${LIB_VULKAN} ${INCL_VULKAN} ${LINALG_INCL} ${INCL_STB} ${INCL_JSON} -I src/ -D USE_STRING_LIB -o glfw_wind.exe
 
 
 

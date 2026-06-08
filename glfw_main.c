@@ -182,8 +182,8 @@ int main(int argc, char *argv[]){
        controller_init();
 
        //printf("Loading level\n");
-       //load_level("assets\\levels\\level1.txt");
-       //exit(1);
+       load_level("assets\\levels\\level1.json");
+       exit(1);
 
        
        printf("Finished starting vulkan... Entering main loop\n");

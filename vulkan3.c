@@ -1264,11 +1264,6 @@ void createVertexBuffer(){
 
 
 
-typedef struct Vertex_tex_t {
-       float pos[3];
-       float color[3];
-       float texCord[2];
-} Vertex_tex_t;
 
 static VkVertexInputBindingDescription VertextTrigTex2Ddescription = {
        0, /* index of bindin in an array of this?*/  sizeof(Vertex_tex_t) /*stride*/, VK_VERTEX_INPUT_RATE_VERTEX /*Changes with instanceing*/
@@ -2085,7 +2080,6 @@ uint8_t *load_file(const char *filename, uint32_t *sz_out, int flags){
        passert(fd != -1, "Opening file for read.");
 
        sz = _lseek(fd, 0, SEEK_END);
-       *sz_out = sz;
        passert(sz != -1, "Finding end of file.");
 
        uint8_t *shader = (uint8_t *)calloc(sizeof(uint8_t), sz);
@@ -2095,8 +2089,14 @@ uint8_t *load_file(const char *filename, uint32_t *sz_out, int flags){
 
        n = 0;
        while(n < sz){
-              n += _read(fd, shader + n, sz-n);
+              //n += _read(fd, shader + n, sz-n);
+              n += _read(fd, shader + n, 1);
+              if(shader[n - 1] == '\n' && flags == _O_TEXT){
+                     sz -= 1;
+              }
+              //printf("%d\n", sz-n);
        }
+       *sz_out = sz;
        _close(fd);
        return shader;
 }
@@ -3096,7 +3096,9 @@ int line_format(char *buffer, char *pattern, float *floats, int *ints){
 
 
 void load_level(char *filename){
+       load_level_ext(filename);
        //f = open(filename, O_RDONLY);
+       /*
        uint32_t sz_file;
        char *fbuffer = (char *)load_file(filename, &sz_file, _O_BINARY);
        char *alloc = fbuffer;
@@ -3134,21 +3136,25 @@ void load_level(char *filename){
                                           dynamic_data.textureImageMemorys + i, \
                                           dynamic_data.textureImageViews + i);
               fbuffer += j + 2;
-
        }
+
        printf("Done loading textures\n");
 
-       ret = line_format(fbuffer, "N_objects=.\n", floats, ints);
-       if(ret == -1){
+       int delta = line_format(fbuffer, "N_objects=.\n", floats, ints);
+       if(delta == -1){
               printf("Cant read number of objects\n");
               return;
        }
-       //dynamic_data.
+       fbuffer += delta;
 
-       // 2. Create the new descriptor sets with this - 1 per texture
-
-       // createDescriptorPool(&(dynamic_data.descriptorPool), MAX_FRAMES_IN_FLIGHT*dynamic_data.n_textures, MAX_FRAMES_IN_FLIGHT*dynamic_data.n_textures);
+       dynamic_data.n_objects = ints[0];
        
+       // 1 for every object and texture combo
+       createDescriptorPool(&(dynamic_data.descriptorPool), MAX_FRAMES_IN_FLIGHT*dynamic_data.n_objects, MAX_FRAMES_IN_FLIGHT*dynamic_data.n_objects);
+
+       // 2. Create the new descriptor sets with this - 1 per object
+
+
        // createtwodDescriptorSets(); Need 1 set per texture + pool
        // createTexturedDescriptorSets(MAX_FRAMES_IN_FLIGHT, VkDescriptorSetLayout layout vulkan_info.threeddescriptorSetLayout, VkDescriptorPool descriptorPool, VkDescriptorSet **descriptorSetsArr_p, \
 VkBuffer *uniformBufferArr, int ubo_size, VkImageView textureImageView, VkSampler textureSampler);
@@ -3156,8 +3162,8 @@ VkBuffer *uniformBufferArr, int ubo_size, VkImageView textureImageView, VkSample
 
        // 3.
 
-
-       free(alloc);
+       printf("Done loading level (./%s)\n", filename);
+       free(alloc);*/
 }
 
 /*

@@ -2,7 +2,7 @@
 #define VULKAN3_H 
 
 #include <vulkan/vulkan.h>
-
+#include "src/level_ctrl.h"
 
 typedef struct charcter_t{
        uint8_t index;
@@ -46,11 +46,19 @@ void vulkan_resized();
 
 void load_level(char *filename);
 
+uint8_t *load_file(const char *filename, uint32_t *sz_out, int flags);
+
 typedef struct Vertex_t{
        float pos[3];
        float color[3];
 } Vertex_t;
 
+
+typedef struct Vertex_tex_t {
+       float pos[3];
+       float color[3];
+       float texCord[2];
+} Vertex_tex_t;
 
 
 #endif
